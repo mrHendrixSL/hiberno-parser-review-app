@@ -8,7 +8,7 @@ import streamlit as st
 # =========================================================
 # Config
 # =========================================================
-DEFAULT_JSONL_PATH = "data/qaWithHallucinationFlags.jsonl"
+DEFAULT_JSONL_PATH = "data/normalized_withhallucinationFlags.jsonl"
 
 st.set_page_config(
     page_title="Parser Output Review",
