@@ -1,12 +1,13 @@
 import html
 import json
 import re
+from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Any, List, Optional
 
 import pandas as pd
 import streamlit as st
-from difflib import SequenceMatcher
+import streamlit.components.v1 as components
 
 # =========================================================
 # Config
@@ -80,10 +81,9 @@ COMPARISON_ROWS = [
     ("region_mentions_norm", "region_mentions_rule_norm", "region_mentions_genai_norm"),
 ]
 
-# Fields where GenAI text gets source-grounding highlighting
 GENAI_HIGHLIGHT_FIELDS = {
-    "headword_genai",
     "headword_raw_genai",
+    "headword_genai",
     "variant_forms_raw_genai",
     "variant_forms_genai",
     "pronunciations_genai",
@@ -97,98 +97,6 @@ GENAI_HIGHLIGHT_FIELDS = {
     "region_mentions_genai_norm",
 }
 
-# =========================================================
-# Styling
-# =========================================================
-st.markdown(
-    """
-    <style>
-    .small-muted {
-        color: #666;
-        font-size: 0.9rem;
-    }
-
-    .value-box {
-        border: 1px solid #d1d5db;
-        background: #f9fafb;
-        border-radius: 8px;
-        padding: 0.7rem;
-        white-space: pre-wrap;
-        overflow: auto;
-        max-height: 280px;
-        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-        font-size: 0.88rem;
-        line-height: 1.4;
-    }
-
-    .value-box.warn {
-        border-color: #dc2626;
-        background: #fef2f2;
-    }
-
-    .cmp-table {
-        width: 100%;
-        border-collapse: collapse;
-        table-layout: fixed;
-        margin-top: 0.5rem;
-    }
-
-    .cmp-table th, .cmp-table td {
-        border: 1px solid #e5e7eb;
-        vertical-align: top;
-        padding: 0.6rem;
-    }
-
-    .cmp-table th {
-        background: #f3f4f6;
-        text-align: left;
-        font-weight: 700;
-    }
-
-    .cmp-table .field-col {
-        width: 16%;
-        font-weight: 700;
-        background: #fafafa;
-    }
-
-    .cmp-table .rule-col {
-        width: 42%;
-    }
-
-    .cmp-table .genai-col {
-        width: 42%;
-    }
-
-    .cell-box {
-        white-space: pre-wrap;
-        overflow: auto;
-        max-height: 260px;
-        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-        font-size: 0.88rem;
-        line-height: 1.45;
-    }
-
-    .cell-diff {
-        background: #fef2f2;
-    }
-
-    .hallucinated {
-        background: #fee2e2;
-        color: #991b1b;
-        border-radius: 4px;
-        padding: 0 0.08rem;
-    }
-
-    .source-shared {
-        background: #dcfce7;
-        color: #166534;
-        border-radius: 4px;
-        padding: 0 0.08rem;
-    }
-    </style>
-    """,
-    unsafe_allow_html=True,
-)
 
 # =========================================================
 # State
@@ -246,17 +154,6 @@ def value_is_missing(value: Any) -> bool:
     return False
 
 
-def normalize_scalar_for_search(value: Any) -> str:
-    if value_is_missing(value):
-        return ""
-    if isinstance(value, (dict, list)):
-        try:
-            return json.dumps(value, ensure_ascii=False).lower()
-        except Exception:
-            return str(value).lower()
-    return str(value).lower()
-
-
 def pretty_value(value: Any) -> str:
     if value_is_missing(value):
         return "∅"
@@ -281,6 +178,17 @@ def pretty_value(value: Any) -> str:
         return value
 
     return str(value)
+
+
+def normalize_scalar_for_search(value: Any) -> str:
+    if value_is_missing(value):
+        return ""
+    if isinstance(value, (dict, list)):
+        try:
+            return json.dumps(value, ensure_ascii=False).lower()
+        except Exception:
+            return str(value).lower()
+    return str(value).lower()
 
 
 def value_equal(a: Any, b: Any) -> bool:
@@ -308,8 +216,15 @@ def status_badge(value: Any) -> str:
 
         green_values = {"true", "match", "matched", "both_present", "present", "ok", "yes"}
         yellow_values = {
-            "partial", "one_sided", "one-sided", "rule_only", "genai_only",
-            "only_rule", "only_genai", "left_only", "right_only"
+            "partial",
+            "one_sided",
+            "one-sided",
+            "rule_only",
+            "genai_only",
+            "only_rule",
+            "only_genai",
+            "left_only",
+            "right_only",
         }
         red_values = {"false", "mismatch", "different", "hallucination", "flagged", "error", "conflict"}
         grey_values = {"both_missing", "missing", "none", "null", ""}
@@ -435,13 +350,9 @@ def jump_to_entry_id(filtered_df: pd.DataFrame, entry_id_value: str) -> Optional
 
 
 # =========================================================
-# Source-grounded highlighting
+# Highlighting
 # =========================================================
 def tokenize_for_alignment(text: str) -> List[str]:
-    """
-    Split into word chunks and non-word chunks, preserving spaces/punctuation.
-    Example: "I've had..." -> ["I", "'", "ve", " ", "had", ".", ".", "."]
-    """
     return re.findall(r"\w+|\W+", text, flags=re.UNICODE)
 
 
@@ -450,10 +361,6 @@ def normalize_token(token: str) -> str:
 
 
 def build_hallucination_highlight_html(source_text: Any, target_text: Any) -> str:
-    """
-    Highlight tokens in target_text that cannot be aligned back to source_text.
-    Inserted/non-source content is shown in red.
-    """
     if value_is_missing(target_text):
         return "∅"
 
@@ -476,13 +383,15 @@ def build_hallucination_highlight_html(source_text: Any, target_text: Any) -> st
     rendered = []
     for i, token in enumerate(tgt_tokens):
         escaped = html.escape(token)
-
-        # Keep whitespace/punctuation normal unless it is part of a word token
         if i in matched_target_positions:
             rendered.append(escaped)
         else:
             if re.search(r"\w", token, flags=re.UNICODE):
-                rendered.append(f"<span class='hallucinated'>{escaped}</span>")
+                rendered.append(
+                    "<span style='background:#fee2e2;color:#991b1b;"
+                    "padding:0 2px;border-radius:3px;'>"
+                    f"{escaped}</span>"
+                )
             else:
                 rendered.append(escaped)
 
@@ -490,11 +399,6 @@ def build_hallucination_highlight_html(source_text: Any, target_text: Any) -> st
 
 
 def render_json_like_html(value: Any, source_text: Any, highlight_non_source: bool) -> str:
-    """
-    Render nested structures readably.
-    Keys stay plain.
-    String values can be source-grounded highlighted.
-    """
     if value_is_missing(value):
         return "∅"
 
@@ -505,7 +409,11 @@ def render_json_like_html(value: Any, source_text: Any, highlight_non_source: bo
             return "null"
 
         if isinstance(v, str):
-            escaped = build_hallucination_highlight_html(source_text, v) if highlight_non_source else html.escape(v)
+            escaped = (
+                build_hallucination_highlight_html(source_text, v)
+                if highlight_non_source
+                else html.escape(v)
+            )
             return f'"{escaped}"'
 
         if isinstance(v, bool):
@@ -540,10 +448,9 @@ def render_json_like_html(value: Any, source_text: Any, highlight_non_source: bo
 
 
 def render_cell_html(value: Any, source_text: Any, highlight_non_source: bool) -> str:
-    """
-    Render a cell as HTML, keeping raw structure readable.
-    """
-    # If it is a JSON-looking string, parse it first so keys are not falsely highlighted.
+    if value_is_missing(value):
+        return "∅"
+
     if isinstance(value, str):
         stripped = value.strip()
         if stripped and (
@@ -611,26 +518,17 @@ def render_source_text(row: pd.Series) -> None:
     genai_text = row.get("source_text_genai")
 
     if value_equal(rule_text, genai_text):
-        st.caption("One source text shown. `source_text_rule` and `source_text_genai` match.")
-        st.markdown(
-            f"<div class='value-box'>{html.escape(pretty_value(rule_text))}</div>",
-            unsafe_allow_html=True,
-        )
+        st.caption("One source text shown. source_text_rule and source_text_genai match.")
+        st.code(pretty_value(rule_text), language=None)
     else:
-        st.warning("`source_text_rule` and `source_text_genai` differ.")
+        st.warning("source_text_rule and source_text_genai differ.")
         left, right = st.columns(2)
         with left:
             st.markdown("**source_text_rule**")
-            st.markdown(
-                f"<div class='value-box warn'>{html.escape(pretty_value(rule_text))}</div>",
-                unsafe_allow_html=True,
-            )
+            st.code(pretty_value(rule_text), language=None)
         with right:
             st.markdown("**source_text_genai**")
-            st.markdown(
-                f"<div class='value-box warn'>{html.escape(pretty_value(genai_text))}</div>",
-                unsafe_allow_html=True,
-            )
+            st.code(pretty_value(genai_text), language=None)
 
 
 def render_comparison_table(row: pd.Series) -> None:
@@ -659,40 +557,47 @@ def render_comparison_table(row: pd.Series) -> None:
 
         rows_html += f"""
         <tr>
-            <td style="font-weight:600; background:#fafafa; width:15%">{html.escape(field_label)}</td>
-            <td style="background:{bg}; padding:8px; vertical-align:top;">
-                <div style="white-space:pre-wrap; max-height:250px; overflow:auto; font-family:monospace; font-size:0.85rem;">
+            <td style="font-weight:600; background:#fafafa; width:15%; border:1px solid #ddd; padding:8px; vertical-align:top;">
+                {html.escape(field_label)}
+            </td>
+            <td style="background:{bg}; padding:8px; vertical-align:top; border:1px solid #ddd;">
+                <div style="white-space:pre-wrap; max-height:250px; overflow:auto; font-family:monospace; font-size:0.85rem; line-height:1.45;">
                     {rule_html}
                 </div>
             </td>
-            <td style="background:{bg}; padding:8px; vertical-align:top;">
-                <div style="white-space:pre-wrap; max-height:250px; overflow:auto; font-family:monospace; font-size:0.85rem;">
+            <td style="background:{bg}; padding:8px; vertical-align:top; border:1px solid #ddd;">
+                <div style="white-space:pre-wrap; max-height:250px; overflow:auto; font-family:monospace; font-size:0.85rem; line-height:1.45;">
                     {genai_html}
                 </div>
             </td>
         </tr>
         """
 
-    table_html = f"""
-    <div style="font-size:0.9rem; color:#666; margin-bottom:8px;">
-        Red text in the GenAI column = not grounded in source (potential hallucination)
-    </div>
+    full_html = f"""
+    <!DOCTYPE html>
+    <html>
+    <body style="font-family: Arial, sans-serif; margin: 0; padding: 0;">
+        <div style="font-size:0.9rem; color:#666; margin-bottom:10px;">
+            Red text in the GenAI column = text not grounded in source.
+        </div>
 
-    <table style="width:100%; border-collapse:collapse;">
-        <thead>
-            <tr style="background:#f3f4f6;">
-                <th style="text-align:left; padding:8px; border:1px solid #ddd;">Field</th>
-                <th style="text-align:left; padding:8px; border:1px solid #ddd;">Rule-based</th>
-                <th style="text-align:left; padding:8px; border:1px solid #ddd;">GenAI</th>
-            </tr>
-        </thead>
-        <tbody>
-            {rows_html}
-        </tbody>
-    </table>
+        <table style="width:100%; border-collapse:collapse; table-layout:fixed;">
+            <thead>
+                <tr style="background:#f3f4f6;">
+                    <th style="text-align:left; padding:8px; border:1px solid #ddd; width:15%;">Field</th>
+                    <th style="text-align:left; padding:8px; border:1px solid #ddd; width:42.5%;">Rule-based</th>
+                    <th style="text-align:left; padding:8px; border:1px solid #ddd; width:42.5%;">GenAI</th>
+                </tr>
+            </thead>
+            <tbody>
+                {rows_html}
+            </tbody>
+        </table>
+    </body>
+    </html>
     """
 
-    st.markdown(table_html, unsafe_allow_html=True)
+    components.html(full_html, height=1200, scrolling=True)
 
 
 def render_diagnostics(row: pd.Series) -> None:
@@ -718,7 +623,7 @@ def render_diagnostics(row: pd.Series) -> None:
 
 
 # =========================================================
-# App
+# Main app
 # =========================================================
 def main() -> None:
     init_state()
@@ -786,9 +691,7 @@ def main() -> None:
     if next_top:
         st.session_state.current_pos = min(filtered_total - 1, st.session_state.current_pos + 1)
 
-    clamp_current_pos(filtered_total)
-
-    nav_a, nav_b, nav_c = st.columns([1, 1, 4])
+    nav_a, nav_b = st.columns([1, 1])
     with nav_a:
         prev_bottom = st.button("Previous row")
     with nav_b:
