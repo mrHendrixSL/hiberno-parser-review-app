@@ -52,9 +52,9 @@ STRUCTURED_FIELDS = [
 ]
 
 LARGE_COMPARISON_FIELDS = [
-    ("definition_rule", "definition_genai"),
-    ("examples_rule", "examples_genai"),
-    ("etymology_rule", "etymology_genai"),
+    ("definition", "definition_rule", "definition_genai"),
+    ("examples", "examples_rule", "examples_genai"),
+    ("etymology", "etymology_rule", "etymology_genai"),
 ]
 
 DIAGNOSTIC_FIELDS = [
@@ -464,28 +464,26 @@ def build_structured_comparison_df(row: pd.Series) -> pd.DataFrame:
                 "field": label,
                 "rule_based": pretty_value(left_raw),
                 "genai": pretty_value(right_raw),
-                "status": "match" if value_equal(left_raw, right_raw) else "mismatch",
             }
         )
 
     return pd.DataFrame(rows)
 
 
-def render_structured_dataframe(row: pd.Series) -> None:
-    st.subheader("Structured Fields")
-
+def render_continuous_comparison(row: pd.Series) -> None:
     df_struct = build_structured_comparison_df(row)
 
-    def style_status(val: Any) -> str:
-        if val == "match":
-            return "background-color: #dcfce7; color: #166534; font-weight: 600;"
-        if val == "mismatch":
-            return "background-color: #fee2e2; color: #991b1b; font-weight: 600;"
-        return ""
+    def highlight_mismatch(data: pd.DataFrame) -> pd.DataFrame:
+        styles = pd.DataFrame("", index=data.index, columns=data.columns)
+        for idx in data.index:
+            if data.loc[idx, "rule_based"] != data.loc[idx, "genai"]:
+                styles.loc[idx, "rule_based"] = "background-color: #fee2e2; color: #991b1b;"
+                styles.loc[idx, "genai"] = "background-color: #fee2e2; color: #991b1b;"
+        return styles
 
     styled = (
         df_struct.style
-        .map(style_status, subset=["status"])
+        .apply(highlight_mismatch, axis=None)
         .set_properties(
             subset=["field"],
             **{
@@ -511,17 +509,13 @@ def render_structured_dataframe(row: pd.Series) -> None:
         height=420,
     )
 
-
-def render_large_comparison(row: pd.Series) -> None:
-    st.subheader("Detailed Fields")
-
     header_left, header_right = st.columns(2)
     with header_left:
         st.markdown("### Rule-based")
     with header_right:
         st.markdown("### GenAI")
 
-    for left_field, right_field in LARGE_COMPARISON_FIELDS:
+    for display_label, left_field, right_field in LARGE_COMPARISON_FIELDS:
         val_left = row.get(left_field)
         val_right = row.get(right_field)
         different = not value_equal(val_left, val_right)
@@ -664,10 +658,7 @@ def main() -> None:
     render_source_text(selected_row)
 
     st.divider()
-    render_structured_dataframe(selected_row)
-
-    st.divider()
-    render_large_comparison(selected_row)
+    render_continuous_comparison(selected_row)
 
     st.divider()
     render_diagnostics(selected_row)
