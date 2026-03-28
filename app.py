@@ -17,7 +17,7 @@ st.set_page_config(
 )
 
 # =========================================================
-# Helpers / field groups
+# Field groups
 # =========================================================
 MATCH_FIELDS = [
     "source_text_match",
@@ -38,17 +38,17 @@ FILTER_FIELDS = [
     "region_mentions_presence_status",
 ]
 
-SMALL_COMPARISON_FIELDS = [
-    ("headword_raw_rule", "headword_raw_genai"),
-    ("headword_rule", "headword_genai"),
-    ("variant_forms_raw_rule", "variant_forms_raw_genai"),
-    ("variant_forms_rule", "variant_forms_genai"),
-    ("pronunciations_rule", "pronunciations_genai"),
-    ("part_of_speech_rule", "part_of_speech_genai"),
-    ("part_of_speech_rule_norm", "part_of_speech_genai_norm"),
-    ("cross_references_rule", "cross_references_genai"),
-    ("region_mentions_rule", "region_mentions_genai"),
-    ("region_mentions_rule_norm", "region_mentions_genai_norm"),
+STRUCTURED_FIELDS = [
+    ("headword_raw", "headword_raw_rule", "headword_raw_genai"),
+    ("headword", "headword_rule", "headword_genai"),
+    ("variant_forms_raw", "variant_forms_raw_rule", "variant_forms_raw_genai"),
+    ("variant_forms", "variant_forms_rule", "variant_forms_genai"),
+    ("pronunciations", "pronunciations_rule", "pronunciations_genai"),
+    ("part_of_speech", "part_of_speech_rule", "part_of_speech_genai"),
+    ("part_of_speech_norm", "part_of_speech_rule_norm", "part_of_speech_genai_norm"),
+    ("cross_references", "cross_references_rule", "cross_references_genai"),
+    ("region_mentions", "region_mentions_rule", "region_mentions_genai"),
+    ("region_mentions_norm", "region_mentions_rule_norm", "region_mentions_genai_norm"),
 ]
 
 LARGE_COMPARISON_FIELDS = [
@@ -185,7 +185,7 @@ def is_false_like(value: Any) -> bool:
 
 
 # =========================================================
-# UI badges / blocks
+# UI helpers
 # =========================================================
 def status_badge(value: Any) -> str:
     if value_is_missing(value):
@@ -280,16 +280,6 @@ def render_value_block(
     )
 
 
-def render_small_value_block(label: str, value: Any, *, is_different: bool = False) -> None:
-    render_value_block(
-        label=label,
-        value=value,
-        is_different=is_different,
-        max_height=140,
-        font_size="0.85rem",
-    )
-
-
 def render_large_value_block(label: str, value: Any, *, is_different: bool = False) -> None:
     render_value_block(
         label=label,
@@ -313,7 +303,7 @@ def render_badge_row(data: pd.Series, fields: Iterable[str]) -> None:
 
 
 # =========================================================
-# Filtering / navigation
+# Filtering / search / navigation
 # =========================================================
 def search_mask(df: pd.DataFrame, query: str) -> pd.Series:
     if not query.strip():
@@ -459,30 +449,67 @@ def render_header(row: pd.Series, filtered_position: int, filtered_total: int, r
 
 def render_source_text(row: pd.Series) -> None:
     st.subheader("Source Text")
-
     source_value = row.get("source_text_rule")
     render_large_value_block("source_text", source_value, is_different=False)
 
 
-def render_small_comparison(row: pd.Series) -> None:
+def build_structured_comparison_df(row: pd.Series) -> pd.DataFrame:
+    rows = []
+    for label, left_field, right_field in STRUCTURED_FIELDS:
+        left_raw = row.get(left_field)
+        right_raw = row.get(right_field)
+
+        rows.append(
+            {
+                "field": label,
+                "rule_based": pretty_value(left_raw),
+                "genai": pretty_value(right_raw),
+                "status": "match" if value_equal(left_raw, right_raw) else "mismatch",
+            }
+        )
+
+    return pd.DataFrame(rows)
+
+
+def render_structured_dataframe(row: pd.Series) -> None:
     st.subheader("Structured Fields")
 
-    header_left, header_right = st.columns(2)
-    with header_left:
-        st.markdown("### Rule-based")
-    with header_right:
-        st.markdown("### GenAI")
+    df_struct = build_structured_comparison_df(row)
 
-    for left_field, right_field in SMALL_COMPARISON_FIELDS:
-        val_left = row.get(left_field)
-        val_right = row.get(right_field)
-        different = not value_equal(val_left, val_right)
+    def style_status(val: Any) -> str:
+        if val == "match":
+            return "background-color: #dcfce7; color: #166534; font-weight: 600;"
+        if val == "mismatch":
+            return "background-color: #fee2e2; color: #991b1b; font-weight: 600;"
+        return ""
 
-        col1, col2 = st.columns(2)
-        with col1:
-            render_small_value_block(left_field, val_left, is_different=different)
-        with col2:
-            render_small_value_block(right_field, val_right, is_different=different)
+    styled = (
+        df_struct.style
+        .map(style_status, subset=["status"])
+        .set_properties(
+            subset=["field"],
+            **{
+                "font-weight": "600",
+                "white-space": "nowrap",
+            },
+        )
+        .set_properties(
+            subset=["rule_based", "genai"],
+            **{
+                "white-space": "pre-wrap",
+                "font-family": "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
+                "font-size": "0.88rem",
+                "vertical-align": "top",
+            },
+        )
+    )
+
+    st.dataframe(
+        styled,
+        use_container_width=True,
+        hide_index=True,
+        height=420,
+    )
 
 
 def render_large_comparison(row: pd.Series) -> None:
@@ -637,7 +664,7 @@ def main() -> None:
     render_source_text(selected_row)
 
     st.divider()
-    render_small_comparison(selected_row)
+    render_structured_dataframe(selected_row)
 
     st.divider()
     render_large_comparison(selected_row)
