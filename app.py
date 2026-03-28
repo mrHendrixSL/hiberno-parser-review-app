@@ -640,14 +640,13 @@ def render_comparison_table(row: pd.Series) -> None:
     if value_is_missing(source_text):
         source_text = row.get("source_text_genai")
 
-    table_rows = []
+    rows_html = ""
+
     for field_label, rule_col, genai_col in COMPARISON_ROWS:
         rule_val = row.get(rule_col)
         genai_val = row.get(genai_col)
 
         row_diff = not value_equal(rule_val, genai_val)
-        rule_class = "cell-box cell-diff" if row_diff else "cell-box"
-        genai_class = "cell-box cell-diff" if row_diff else "cell-box"
 
         rule_html = render_cell_html(rule_val, source_text, highlight_non_source=False)
         genai_html = render_cell_html(
@@ -656,35 +655,43 @@ def render_comparison_table(row: pd.Series) -> None:
             highlight_non_source=(genai_col in GENAI_HIGHLIGHT_FIELDS),
         )
 
-        table_rows.append(
-            f"""
-            <tr>
-                <td class="field-col">{html.escape(field_label)}</td>
-                <td class="rule-col"><div class="{rule_class}">{rule_html}</div></td>
-                <td class="genai-col"><div class="{genai_class}">{genai_html}</div></td>
-            </tr>
-            """
-        )
+        bg = "#fef2f2" if row_diff else "white"
+
+        rows_html += f"""
+        <tr>
+            <td style="font-weight:600; background:#fafafa; width:15%">{html.escape(field_label)}</td>
+            <td style="background:{bg}; padding:8px; vertical-align:top;">
+                <div style="white-space:pre-wrap; max-height:250px; overflow:auto; font-family:monospace; font-size:0.85rem;">
+                    {rule_html}
+                </div>
+            </td>
+            <td style="background:{bg}; padding:8px; vertical-align:top;">
+                <div style="white-space:pre-wrap; max-height:250px; overflow:auto; font-family:monospace; font-size:0.85rem;">
+                    {genai_html}
+                </div>
+            </td>
+        </tr>
+        """
 
     table_html = f"""
-    <table class="cmp-table">
+    <div style="font-size:0.9rem; color:#666; margin-bottom:8px;">
+        Red text in the GenAI column = not grounded in source (potential hallucination)
+    </div>
+
+    <table style="width:100%; border-collapse:collapse;">
         <thead>
-            <tr>
-                <th class="field-col">Field</th>
-                <th class="rule-col">Rule based</th>
-                <th class="genai-col">GenAI</th>
+            <tr style="background:#f3f4f6;">
+                <th style="text-align:left; padding:8px; border:1px solid #ddd;">Field</th>
+                <th style="text-align:left; padding:8px; border:1px solid #ddd;">Rule-based</th>
+                <th style="text-align:left; padding:8px; border:1px solid #ddd;">GenAI</th>
             </tr>
         </thead>
         <tbody>
-            {''.join(table_rows)}
+            {rows_html}
         </tbody>
     </table>
     """
 
-    st.markdown(
-        "<div class='small-muted'>Red text in the GenAI column marks tokens that could not be aligned to the original source text.</div>",
-        unsafe_allow_html=True,
-    )
     st.markdown(table_html, unsafe_allow_html=True)
 
 
