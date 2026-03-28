@@ -17,7 +17,7 @@ st.set_page_config(
 )
 
 # =========================================================
-# Helpers
+# Helpers / field groups
 # =========================================================
 MATCH_FIELDS = [
     "source_text_match",
@@ -38,22 +38,7 @@ FILTER_FIELDS = [
     "region_mentions_presence_status",
 ]
 
-HEADER_FIELDS = [
-    "entry_id",
-    "_merge",
-    "source_text_match",
-    "pos_match_norm",
-    "region_mentions_match_norm",
-    "rule_possible_hallucination",
-    "genai_possible_hallucination",
-]
-
-SOURCE_FIELDS = [
-    "source_text_rule",
-    "source_text_genai",
-]
-
-COMPARISON_FIELDS = [
+SMALL_COMPARISON_FIELDS = [
     ("headword_raw_rule", "headword_raw_genai"),
     ("headword_rule", "headword_genai"),
     ("variant_forms_raw_rule", "variant_forms_raw_genai"),
@@ -61,12 +46,15 @@ COMPARISON_FIELDS = [
     ("pronunciations_rule", "pronunciations_genai"),
     ("part_of_speech_rule", "part_of_speech_genai"),
     ("part_of_speech_rule_norm", "part_of_speech_genai_norm"),
-    ("definition_rule", "definition_genai"),
-    ("examples_rule", "examples_genai"),
-    ("etymology_rule", "etymology_genai"),
     ("cross_references_rule", "cross_references_genai"),
     ("region_mentions_rule", "region_mentions_genai"),
     ("region_mentions_rule_norm", "region_mentions_genai_norm"),
+]
+
+LARGE_COMPARISON_FIELDS = [
+    ("definition_rule", "definition_genai"),
+    ("examples_rule", "examples_genai"),
+    ("etymology_rule", "etymology_genai"),
 ]
 
 DIAGNOSTIC_FIELDS = [
@@ -89,25 +77,25 @@ PRESENCE_STATUS_FIELDS = [
 ]
 
 
+# =========================================================
+# State
+# =========================================================
 def init_state() -> None:
-    """Initialize session state keys used for navigation and search."""
     defaults = {
         "current_pos": 0,
         "jump_entry_id_input": "",
         "search_text_input": "",
-        "row_selector_override": None,
     }
     for key, value in defaults.items():
         if key not in st.session_state:
             st.session_state[key] = value
 
 
+# =========================================================
+# Data loading
+# =========================================================
 @st.cache_data(show_spinner=True)
 def load_jsonl(path_str: str) -> pd.DataFrame:
-    """
-    Load a JSONL file into a DataFrame.
-    Raises clear errors for missing files or malformed JSONL.
-    """
     path = Path(path_str)
 
     if not path.exists():
@@ -131,22 +119,10 @@ def load_jsonl(path_str: str) -> pd.DataFrame:
     return df
 
 
-def normalize_scalar_for_search(value: Any) -> str:
-    """Convert any value to a lowercase searchable string."""
-    if value is None:
-        return ""
-    if isinstance(value, float) and pd.isna(value):
-        return ""
-    if isinstance(value, (dict, list)):
-        try:
-            return json.dumps(value, ensure_ascii=False).lower()
-        except Exception:
-            return str(value).lower()
-    return str(value).lower()
-
-
+# =========================================================
+# Value helpers
+# =========================================================
 def value_is_missing(value: Any) -> bool:
-    """Robust missing-value check."""
     if value is None:
         return True
     if isinstance(value, float) and pd.isna(value):
@@ -154,11 +130,20 @@ def value_is_missing(value: Any) -> bool:
     return False
 
 
+def normalize_scalar_for_search(value: Any) -> str:
+    if value_is_missing(value):
+        return ""
+
+    if isinstance(value, (dict, list)):
+        try:
+            return json.dumps(value, ensure_ascii=False).lower()
+        except Exception:
+            return str(value).lower()
+
+    return str(value).lower()
+
+
 def pretty_value(value: Any) -> str:
-    """
-    Pretty-render values without silently truncating.
-    Lists/dicts are formatted as JSON where possible.
-    """
     if value_is_missing(value):
         return "∅"
 
@@ -170,8 +155,10 @@ def pretty_value(value: Any) -> str:
 
     if isinstance(value, str):
         stripped = value.strip()
-        # If a string itself contains JSON, pretty print it.
-        if stripped and ((stripped.startswith("{") and stripped.endswith("}")) or (stripped.startswith("[") and stripped.endswith("]"))):
+        if stripped and (
+            (stripped.startswith("{") and stripped.endswith("}"))
+            or (stripped.startswith("[") and stripped.endswith("]"))
+        ):
             try:
                 parsed = json.loads(stripped)
                 return json.dumps(parsed, indent=2, ensure_ascii=False)
@@ -183,14 +170,12 @@ def pretty_value(value: Any) -> str:
 
 
 def value_equal(a: Any, b: Any) -> bool:
-    """Equality check with NaN/None handling."""
     if value_is_missing(a) and value_is_missing(b):
         return True
     return a == b
 
 
 def is_false_like(value: Any) -> bool:
-    """Interpret common false/mismatch markers."""
     if isinstance(value, bool):
         return value is False
     if value_is_missing(value):
@@ -199,34 +184,31 @@ def is_false_like(value: Any) -> bool:
     return v in {"false", "0", "no", "mismatch", "different", "not_match", "not matched"}
 
 
+# =========================================================
+# UI badges / blocks
+# =========================================================
 def status_badge(value: Any) -> str:
-    """
-    Assign simple badge styling:
-    - green: match / both_present
-    - yellow: partial / one-sided extraction
-    - red: mismatch / hallucination / false
-    - grey: both_missing / empty / unknown
-    """
     if value_is_missing(value):
         label = "missing"
-        color = "#6b7280"  # grey
+        color = "#6b7280"
     else:
         text = str(value).strip()
         lower = text.lower()
 
-        green_values = {
-            "true", "match", "matched", "both_present", "present", "ok", "yes"
-        }
+        green_values = {"true", "match", "matched", "both_present", "present", "ok", "yes"}
         yellow_values = {
-            "partial", "one_sided", "one-sided", "rule_only", "genai_only",
-            "only_rule", "only_genai", "left_only", "right_only"
+            "partial",
+            "one_sided",
+            "one-sided",
+            "rule_only",
+            "genai_only",
+            "only_rule",
+            "only_genai",
+            "left_only",
+            "right_only",
         }
-        red_values = {
-            "false", "mismatch", "different", "hallucination", "flagged", "error", "conflict"
-        }
-        grey_values = {
-            "both_missing", "missing", "none", "null", ""
-        }
+        red_values = {"false", "mismatch", "different", "hallucination", "flagged", "error", "conflict"}
+        grey_values = {"both_missing", "missing", "none", "null", ""}
 
         if lower in green_values:
             label = text
@@ -244,7 +226,6 @@ def status_badge(value: Any) -> str:
             label = text
             color = "#15803d" if value else "#b91c1c"
         else:
-            # Fallback heuristic
             if "match" in lower or "both_present" in lower:
                 label = text
                 color = "#15803d"
@@ -268,8 +249,73 @@ def status_badge(value: Any) -> str:
     )
 
 
+def render_value_block(
+    label: str,
+    value: Any,
+    *,
+    is_different: bool = False,
+    max_height: int = 320,
+    font_size: str = "0.9rem",
+) -> None:
+    border = "#dc2626" if is_different else "#d1d5db"
+    background = "#fef2f2" if is_different else "#f9fafb"
+
+    st.markdown(f"**{label}**")
+    st.markdown(
+        f"""
+        <div style="
+            border:1px solid {border};
+            background:{background};
+            border-radius:8px;
+            padding:0.65rem;
+            max-height:{max_height}px;
+            overflow:auto;
+            white-space:pre-wrap;
+            font-family:ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+            font-size:{font_size};
+            line-height:1.4;
+        ">{pretty_value(value)}</div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def render_small_value_block(label: str, value: Any, *, is_different: bool = False) -> None:
+    render_value_block(
+        label=label,
+        value=value,
+        is_different=is_different,
+        max_height=140,
+        font_size="0.85rem",
+    )
+
+
+def render_large_value_block(label: str, value: Any, *, is_different: bool = False) -> None:
+    render_value_block(
+        label=label,
+        value=value,
+        is_different=is_different,
+        max_height=300,
+        font_size="0.92rem",
+    )
+
+
+def render_badge_row(data: pd.Series, fields: Iterable[str]) -> None:
+    field_list = [f for f in fields if f in data.index]
+    if not field_list:
+        return
+
+    cols = st.columns(len(field_list))
+    for col, field in zip(cols, field_list):
+        with col:
+            st.caption(field)
+            st.markdown(status_badge(data[field]), unsafe_allow_html=True)
+
+
+# =========================================================
+# Filtering / navigation
+# =========================================================
 def search_mask(df: pd.DataFrame, query: str) -> pd.Series:
-    """Text search across selected fields."""
     if not query.strip():
         return pd.Series(True, index=df.index)
 
@@ -293,20 +339,19 @@ def search_mask(df: pd.DataFrame, query: str) -> pd.Series:
 
 
 def apply_filters(df: pd.DataFrame) -> pd.DataFrame:
-    """Apply sidebar filters and search."""
     filtered = df.copy()
 
     st.sidebar.header("Filters")
 
-    # Generic multi-select filters
     for field in FILTER_FIELDS:
         if field not in filtered.columns:
             continue
 
         raw_values = filtered[field].dropna().astype(str).unique().tolist()
-        raw_values = sorted(raw_values, key=lambda x: (x is None, x))
+        raw_values = sorted(raw_values)
+
         selected = st.sidebar.multiselect(
-            f"{field}",
+            field,
             options=raw_values,
             default=[],
             key=f"filter_{field}",
@@ -320,6 +365,7 @@ def apply_filters(df: pd.DataFrame) -> pd.DataFrame:
         value=False,
         help="Checks source_text_match, pos_match_norm, and region_mentions_match_norm.",
     )
+
     if only_false_matches:
         existing = [c for c in MATCH_FIELDS if c in filtered.columns]
         if existing:
@@ -335,7 +381,6 @@ def apply_filters(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def clamp_current_pos(total_rows: int) -> None:
-    """Keep current position within valid bounds."""
     if total_rows <= 0:
         st.session_state.current_pos = 0
         return
@@ -351,7 +396,6 @@ def go_next(total_rows: int) -> None:
 
 
 def jump_to_entry_id(filtered_df: pd.DataFrame, entry_id_value: str) -> Optional[int]:
-    """Return position within filtered subset for a given entry_id."""
     if "entry_id" not in filtered_df.columns:
         return None
 
@@ -370,40 +414,9 @@ def jump_to_entry_id(filtered_df: pd.DataFrame, entry_id_value: str) -> Optional
     return positions.index(target_index)
 
 
-def render_value_block(label: str, value: Any, is_different: bool = False) -> None:
-    """Render a field label and value block."""
-    border = "#dc2626" if is_different else "#d1d5db"
-    background = "#fef2f2" if is_different else "#f9fafb"
-
-    st.markdown(f"**{label}**")
-    st.markdown(
-        f"""
-        <div style="
-            border:1px solid {border};
-            background:{background};
-            border-radius:8px;
-            padding:0.65rem;
-            max-height:320px;
-            overflow:auto;
-            white-space:pre-wrap;
-            font-family:ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-            font-size:0.9rem;
-        ">{pretty_value(value)}</div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-
-def render_badge_row(data: pd.Series, fields: Iterable[str]) -> None:
-    cols = st.columns(len(list(fields)))
-    for col, field in zip(cols, fields):
-        if field not in data.index:
-            continue
-        with col:
-            st.caption(field)
-            st.markdown(status_badge(data[field]), unsafe_allow_html=True)
-
-
+# =========================================================
+# Render sections
+# =========================================================
 def render_header(row: pd.Series, filtered_position: int, filtered_total: int, raw_index: Any) -> None:
     st.subheader("Row Summary")
     st.markdown(
@@ -414,66 +427,95 @@ def render_header(row: pd.Series, filtered_position: int, filtered_total: int, r
     )
 
     info_cols = st.columns(3)
+
     with info_cols[0]:
         st.markdown(f"**entry_id**: `{row.get('entry_id', 'N/A')}`")
         st.markdown(f"**_merge**: {status_badge(row.get('_merge'))}", unsafe_allow_html=True)
+
     with info_cols[1]:
-        st.markdown(f"**source_text_match**: {status_badge(row.get('source_text_match'))}", unsafe_allow_html=True)
-        st.markdown(f"**pos_match_norm**: {status_badge(row.get('pos_match_norm'))}", unsafe_allow_html=True)
+        st.markdown(
+            f"**source_text_match**: {status_badge(row.get('source_text_match'))}",
+            unsafe_allow_html=True,
+        )
+        st.markdown(
+            f"**pos_match_norm**: {status_badge(row.get('pos_match_norm'))}",
+            unsafe_allow_html=True,
+        )
+
     with info_cols[2]:
-        st.markdown(f"**region_mentions_match_norm**: {status_badge(row.get('region_mentions_match_norm'))}", unsafe_allow_html=True)
-        st.markdown(f"**rule_possible_hallucination**: {status_badge(row.get('rule_possible_hallucination'))}", unsafe_allow_html=True)
-        st.markdown(f"**genai_possible_hallucination**: {status_badge(row.get('genai_possible_hallucination'))}", unsafe_allow_html=True)
+        st.markdown(
+            f"**region_mentions_match_norm**: {status_badge(row.get('region_mentions_match_norm'))}",
+            unsafe_allow_html=True,
+        )
+        st.markdown(
+            f"**rule_possible_hallucination**: {status_badge(row.get('rule_possible_hallucination'))}",
+            unsafe_allow_html=True,
+        )
+        st.markdown(
+            f"**genai_possible_hallucination**: {status_badge(row.get('genai_possible_hallucination'))}",
+            unsafe_allow_html=True,
+        )
 
 
 def render_source_text(row: pd.Series) -> None:
     st.subheader("Source Text")
 
-    left, right = st.columns(2)
-    rule_val = row.get("source_text_rule")
-    genai_val = row.get("source_text_genai")
-    different = not value_equal(rule_val, genai_val)
-
-    if different:
-        st.warning("`source_text_rule` and `source_text_genai` differ.")
-
-    with left:
-        render_value_block("source_text_rule", rule_val, is_different=different)
-
-    with right:
-        render_value_block("source_text_genai", genai_val, is_different=different)
+    source_value = row.get("source_text_rule")
+    render_large_value_block("source_text", source_value, is_different=False)
 
 
-def render_comparison(row: pd.Series) -> None:
-    st.subheader("Side-by-Side Comparison")
+def render_small_comparison(row: pd.Series) -> None:
+    st.subheader("Structured Fields")
 
-    left, right = st.columns(2)
-    with left:
+    header_left, header_right = st.columns(2)
+    with header_left:
         st.markdown("### Rule-based")
-    with right:
+    with header_right:
         st.markdown("### GenAI")
 
-    for left_field, right_field in COMPARISON_FIELDS:
+    for left_field, right_field in SMALL_COMPARISON_FIELDS:
         val_left = row.get(left_field)
         val_right = row.get(right_field)
         different = not value_equal(val_left, val_right)
 
         col1, col2 = st.columns(2)
         with col1:
-            render_value_block(left_field, val_left, is_different=different)
+            render_small_value_block(left_field, val_left, is_different=different)
         with col2:
-            render_value_block(right_field, val_right, is_different=different)
+            render_small_value_block(right_field, val_right, is_different=different)
+
+
+def render_large_comparison(row: pd.Series) -> None:
+    st.subheader("Detailed Fields")
+
+    header_left, header_right = st.columns(2)
+    with header_left:
+        st.markdown("### Rule-based")
+    with header_right:
+        st.markdown("### GenAI")
+
+    for left_field, right_field in LARGE_COMPARISON_FIELDS:
+        val_left = row.get(left_field)
+        val_right = row.get(right_field)
+        different = not value_equal(val_left, val_right)
+
+        col1, col2 = st.columns(2)
+        with col1:
+            render_large_value_block(left_field, val_left, is_different=different)
+        with col2:
+            render_large_value_block(right_field, val_right, is_different=different)
 
 
 def render_diagnostics(row: pd.Series) -> None:
     st.subheader("Row-Level Diagnostics")
 
-    diag_cols = st.columns(len(DIAGNOSTIC_FIELDS))
-    for col, field in zip(diag_cols, DIAGNOSTIC_FIELDS):
-        with col:
-            st.caption(field)
-            value = row.get(field, "N/A")
-            st.code(pretty_value(value), language=None)
+    diag_fields_present = [f for f in DIAGNOSTIC_FIELDS if f in row.index]
+    if diag_fields_present:
+        diag_cols = st.columns(len(diag_fields_present))
+        for col, field in zip(diag_cols, diag_fields_present):
+            with col:
+                st.caption(field)
+                st.code(pretty_value(row.get(field, "N/A")), language=None)
 
     st.markdown("#### Presence Flags")
     existing_presence_fields = [f for f in PRESENCE_STATUS_FIELDS if f in row.index]
@@ -490,12 +532,12 @@ def main() -> None:
     init_state()
 
     st.title("Parser Output Qualitative Review")
-    st.caption("Local Streamlit app for auditing rule-based vs GenAI parser output from a JSONL file.")
+    st.caption("Streamlit app for auditing rule-based vs GenAI parser output from a JSONL file.")
 
     file_path = st.text_input(
         "JSONL path",
         value=DEFAULT_JSONL_PATH,
-        help="Local file path to the merged JSONL used for auditing.",
+        help="Path to the merged JSONL used for auditing.",
     )
 
     try:
@@ -504,25 +546,17 @@ def main() -> None:
         st.error(str(e))
         st.stop()
 
-    # Keep original row index visible
     df = df.reset_index(drop=False).rename(columns={"index": "__original_index__"})
 
-    # -------------------------
-    # Top controls
-    # -------------------------
     st.subheader("Navigation & Search")
 
     nav1, nav2, nav3, nav4 = st.columns([1.1, 1.1, 2, 3])
 
     with nav1:
-        if st.button("⬅ Previous", use_container_width=True):
-            go_previous()
+        prev_top = st.button("⬅ Previous", use_container_width=True)
 
-    # Search input persists
     with nav2:
-        if st.button("Next ➡", use_container_width=True):
-            # applied after filtering
-            pass
+        next_top = st.button("Next ➡", use_container_width=True)
 
     with nav3:
         st.text_input(
@@ -535,22 +569,23 @@ def main() -> None:
         st.text_input(
             "Search text",
             key="search_text_input",
-            placeholder="Search source_text_rule / source_text_genai / headword_rule / headword_genai",
+            placeholder="Search source text or headwords",
         )
 
-    # -------------------------
-    # Filters
-    # -------------------------
     filtered = apply_filters(df)
-
     filtered_total = len(filtered)
+
     st.markdown(f"**Rows after filtering:** {filtered_total} / {len(df)}")
 
     if filtered_total == 0:
         st.warning("No rows match the current filters/search.")
         st.stop()
 
-    # Entry ID jump
+    if prev_top:
+        go_previous()
+    if next_top:
+        go_next(filtered_total)
+
     jump_value = st.session_state.get("jump_entry_id_input", "").strip()
     if jump_value:
         target_pos = jump_to_entry_id(filtered, jump_value)
@@ -559,26 +594,19 @@ def main() -> None:
         else:
             st.info("No matching entry_id found within the current filtered subset.")
 
-    # Now that filtered size is known, process Next
-    if nav2.button("dummy_hidden_button", type="secondary", disabled=True):
-        pass  # no-op
-
-    # Manual next button handling from earlier click
-    # We re-read button state through a separate control region
     nav_buttons = st.columns([1, 1, 4])
     with nav_buttons[0]:
-        prev_clicked = st.button("Previous row", key="prev_row_bottom")
+        prev_bottom = st.button("Previous row", key="prev_row_bottom")
     with nav_buttons[1]:
-        next_clicked = st.button("Next row", key="next_row_bottom")
+        next_bottom = st.button("Next row", key="next_row_bottom")
 
-    if prev_clicked:
+    if prev_bottom:
         go_previous()
-    if next_clicked:
+    if next_bottom:
         go_next(filtered_total)
 
     clamp_current_pos(filtered_total)
 
-    # Row selector within filtered subset
     current_pos = st.session_state.current_pos
     selected_pos = st.number_input(
         "Row selector within filtered subset",
@@ -591,12 +619,10 @@ def main() -> None:
 
     if selected_pos != current_pos:
         st.session_state.current_pos = int(selected_pos)
-        current_pos = int(selected_pos)
 
     clamp_current_pos(filtered_total)
     current_pos = st.session_state.current_pos
 
-    # Final row selection
     selected_row = filtered.iloc[current_pos]
     raw_index = selected_row["__original_index__"]
 
@@ -611,7 +637,10 @@ def main() -> None:
     render_source_text(selected_row)
 
     st.divider()
-    render_comparison(selected_row)
+    render_small_comparison(selected_row)
+
+    st.divider()
+    render_large_comparison(selected_row)
 
     st.divider()
     render_diagnostics(selected_row)
