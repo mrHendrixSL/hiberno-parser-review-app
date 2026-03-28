@@ -21,7 +21,7 @@ if not DEFAULT_JSONL_PATH.exists():
 st.set_page_config(
     page_title="Parser Output Qualitative Review",
     layout="wide",
-    initial_sidebar_state="collapsed",
+    initial_sidebar_state="expanded",
 )
 
 # =========================================================
@@ -96,52 +96,6 @@ GENAI_HIGHLIGHT_FIELDS = {
     "region_mentions_genai",
     "region_mentions_genai_norm",
 }
-
-# =========================================================
-# Small UI helpers
-# =========================================================
-def render_badge(value: Any) -> str:
-    if value is None or (isinstance(value, float) and pd.isna(value)):
-        txt, bg = "missing", "#6b7280"
-    else:
-        txt = str(value)
-        lower = txt.strip().lower()
-        if lower in {"true", "match", "matched", "both_present", "present", "ok", "yes"}:
-            bg = "#15803d"
-        elif lower in {"partial", "one_sided", "one-sided", "rule_only", "genai_only", "left_only", "right_only"}:
-            bg = "#ca8a04"
-        elif lower in {"false", "mismatch", "different", "hallucination", "flagged", "error", "conflict"}:
-            bg = "#b91c1c"
-        elif lower in {"both_missing", "missing", "none", "null", ""}:
-            bg = "#6b7280"
-            txt = "missing" if lower == "" else txt
-        else:
-            bg = "#374151"
-
-    return (
-        f"<span style='display:inline-block;padding:0.15rem 0.45rem;border-radius:999px;"
-        f"background:{bg};color:white;font-size:0.75rem;font-weight:600;white-space:nowrap;'>"
-        f"{html.escape(str(txt))}</span>"
-    )
-
-
-def panel_start(title: str) -> str:
-    return f"""
-    <div style="
-        border:1px solid #e5e7eb;
-        border-radius:10px;
-        padding:0.7rem 0.8rem;
-        background:white;
-        height:100%;
-    ">
-        <div style="font-size:0.82rem;font-weight:700;color:#111827;margin-bottom:0.45rem;">
-            {html.escape(title)}
-        </div>
-    """
-
-
-def panel_end() -> str:
-    return "</div>"
 
 
 # =========================================================
@@ -252,6 +206,58 @@ def is_false_like(value: Any) -> bool:
     return v in {"false", "0", "no", "mismatch", "different", "not_match", "not matched"}
 
 
+def status_badge(value: Any) -> str:
+    if value_is_missing(value):
+        label = "missing"
+        color = "#6b7280"
+    else:
+        text = str(value).strip()
+        lower = text.lower()
+
+        green_values = {"true", "match", "matched", "both_present", "present", "ok", "yes"}
+        yellow_values = {
+            "partial",
+            "one_sided",
+            "one-sided",
+            "rule_only",
+            "genai_only",
+            "only_rule",
+            "only_genai",
+            "left_only",
+            "right_only",
+        }
+        red_values = {"false", "mismatch", "different", "hallucination", "flagged", "error", "conflict"}
+        grey_values = {"both_missing", "missing", "none", "null", ""}
+
+        if lower in green_values:
+            label, color = text, "#15803d"
+        elif lower in yellow_values:
+            label, color = text, "#ca8a04"
+        elif lower in red_values:
+            label, color = text, "#b91c1c"
+        elif lower in grey_values:
+            label, color = (text if text else "missing"), "#6b7280"
+        elif isinstance(value, bool):
+            label, color = text, "#15803d" if value else "#b91c1c"
+        else:
+            if "match" in lower or "both_present" in lower:
+                label, color = text, "#15803d"
+            elif "partial" in lower or "only" in lower:
+                label, color = text, "#ca8a04"
+            elif "mismatch" in lower or "halluc" in lower or lower == "false":
+                label, color = text, "#b91c1c"
+            elif "missing" in lower:
+                label, color = text, "#6b7280"
+            else:
+                label, color = text, "#374151"
+
+    return (
+        f"<span style='display:inline-block;padding:0.2rem 0.55rem;"
+        f"border-radius:999px;background:{color};color:white;font-size:0.82rem;"
+        f"font-weight:600;white-space:nowrap;'>{html.escape(label)}</span>"
+    )
+
+
 # =========================================================
 # Search / filtering
 # =========================================================
@@ -280,35 +286,35 @@ def search_mask(df: pd.DataFrame, query: str) -> pd.Series:
 def apply_filters(df: pd.DataFrame) -> pd.DataFrame:
     filtered = df.copy()
 
-    with st.sidebar:
-        st.markdown("### Filters")
+    st.sidebar.header("Filters")
 
-        for field in FILTER_FIELDS:
-            if field not in filtered.columns:
-                continue
+    for field in FILTER_FIELDS:
+        if field not in filtered.columns:
+            continue
 
-            values = filtered[field].dropna().astype(str).unique().tolist()
-            values = sorted(values)
-            selected = st.multiselect(
-                field,
-                options=values,
-                default=[],
-                key=f"filter_{field}",
-            )
-            if selected:
-                filtered = filtered[filtered[field].astype(str).isin(selected)]
-
-        only_false_matches = st.checkbox(
-            "Only rows where any match flag is false",
-            value=False,
+        values = filtered[field].dropna().astype(str).unique().tolist()
+        values = sorted(values)
+        selected = st.sidebar.multiselect(
+            field,
+            options=values,
+            default=[],
+            key=f"filter_{field}",
         )
-        if only_false_matches:
-            existing = [c for c in MATCH_FIELDS if c in filtered.columns]
-            if existing:
-                mask = pd.Series(False, index=filtered.index)
-                for col in existing:
-                    mask = mask | filtered[col].apply(is_false_like)
-                filtered = filtered[mask]
+        if selected:
+            filtered = filtered[filtered[field].astype(str).isin(selected)]
+
+    only_false_matches = st.sidebar.checkbox(
+        "Show only rows where any match flag is false",
+        value=False,
+        help="Checks source_text_match, pos_match_norm, and region_mentions_match_norm.",
+    )
+    if only_false_matches:
+        existing = [c for c in MATCH_FIELDS if c in filtered.columns]
+        if existing:
+            mask = pd.Series(False, index=filtered.index)
+            for col in existing:
+                mask = mask | filtered[col].apply(is_false_like)
+            filtered = filtered[mask]
 
     search_text = st.session_state.get("search_text_input", "").strip()
     filtered = filtered[search_mask(filtered, search_text)]
@@ -382,7 +388,8 @@ def build_hallucination_highlight_html(source_text: Any, target_text: Any) -> st
         else:
             if re.search(r"\w", token, flags=re.UNICODE):
                 rendered.append(
-                    "<span style='background:#fee2e2;color:#991b1b;padding:0 2px;border-radius:3px;'>"
+                    "<span style='background:#fee2e2;color:#991b1b;"
+                    "padding:0 2px;border-radius:3px;'>"
                     f"{escaped}</span>"
                 )
             else:
@@ -468,77 +475,64 @@ def render_cell_html(value: Any, source_text: Any, highlight_non_source: bool) -
 
 
 # =========================================================
-# Render blocks
+# Render helpers
 # =========================================================
-def render_top_strip(row: pd.Series, filtered_position: int, filtered_total: int, raw_index: Any) -> None:
-    left, middle, right = st.columns([1.2, 1.4, 1.1], gap="small")
+def render_header(row: pd.Series, filtered_position: int, filtered_total: int, raw_index: Any) -> None:
+    st.subheader("Row Summary")
+    st.markdown(
+        f"""
+        **Filtered position:** {filtered_position + 1} / {filtered_total}  
+        **Original row index:** {raw_index}
+        """
+    )
 
-    with left:
-        st.markdown("##### Navigation & Search")
-        st.button("Previous row", key="prev_row_top", use_container_width=True)
-        st.button("Next row", key="next_row_top", use_container_width=True)
-        st.text_input("Jump by entry_id", key="jump_entry_id_input", label_visibility="visible")
-        st.text_input("Search text", key="search_text_input", label_visibility="visible")
-        st.caption(f"{filtered_total} rows in current subset")
+    c1, c2, c3 = st.columns(3)
 
-    with middle:
-        summary_html = (
-            panel_start("Row Summary")
-            + f"""
-            <div style="font-size:0.82rem;line-height:1.55;">
-                <div><b>Position</b> {filtered_position + 1} / {filtered_total}</div>
-                <div><b>Raw index</b> {raw_index}</div>
-                <div><b>entry_id</b> <code>{html.escape(str(row.get("entry_id", "N/A")))}</code></div>
-            </div>
+    with c1:
+        st.markdown(f"**entry_id**: `{row.get('entry_id', 'N/A')}`")
+        st.markdown(f"**_merge**: {status_badge(row.get('_merge'))}", unsafe_allow_html=True)
 
-            <div style="margin-top:0.55rem;display:flex;flex-wrap:wrap;gap:0.35rem;">
-                {render_badge(row.get("_merge"))}
-                {render_badge(row.get("source_text_match"))}
-                {render_badge(row.get("pos_match_norm"))}
-                {render_badge(row.get("region_mentions_match_norm"))}
-                {render_badge(row.get("rule_possible_hallucination"))}
-                {render_badge(row.get("genai_possible_hallucination"))}
-            </div>
-            """
-            + panel_end()
+    with c2:
+        st.markdown(f"**source_text_match**: {status_badge(row.get('source_text_match'))}", unsafe_allow_html=True)
+        st.markdown(f"**pos_match_norm**: {status_badge(row.get('pos_match_norm'))}", unsafe_allow_html=True)
+
+    with c3:
+        st.markdown(
+            f"**region_mentions_match_norm**: {status_badge(row.get('region_mentions_match_norm'))}",
+            unsafe_allow_html=True,
         )
-        st.markdown(summary_html, unsafe_allow_html=True)
-
-    with right:
-        diag_html = (
-            panel_start("Diagnostics")
-            + "<div style='font-size:0.8rem;line-height:1.55;'>"
-            + "".join(
-                f"<div><b>{html.escape(field)}</b>: {html.escape(str(row.get(field, 'N/A')))}</div>"
-                for field in DIAGNOSTIC_FIELDS
-                if field in row.index
-            )
-            + "</div>"
-            + panel_end()
+        st.markdown(
+            f"**rule_possible_hallucination**: {status_badge(row.get('rule_possible_hallucination'))}",
+            unsafe_allow_html=True,
         )
-        st.markdown(diag_html, unsafe_allow_html=True)
+        st.markdown(
+            f"**genai_possible_hallucination**: {status_badge(row.get('genai_possible_hallucination'))}",
+            unsafe_allow_html=True,
+        )
 
 
 def render_source_text(row: pd.Series) -> None:
-    st.markdown("#### Source text")
+    st.subheader("Source Text")
 
     rule_text = row.get("source_text_rule")
     genai_text = row.get("source_text_genai")
 
     if value_equal(rule_text, genai_text):
+        st.caption("One source text shown. source_text_rule and source_text_genai match.")
         st.code(pretty_value(rule_text), language=None)
     else:
-        c1, c2 = st.columns(2)
-        with c1:
-            st.caption("source_text_rule")
+        st.warning("source_text_rule and source_text_genai differ.")
+        left, right = st.columns(2)
+        with left:
+            st.markdown("**source_text_rule**")
             st.code(pretty_value(rule_text), language=None)
-        with c2:
-            st.caption("source_text_genai")
+        with right:
+            st.markdown("**source_text_genai**")
             st.code(pretty_value(genai_text), language=None)
 
 
 def render_comparison_table(row: pd.Series) -> None:
-    st.markdown("#### Comparison")
+    st.subheader("Comparison Table")
 
     source_text = row.get("source_text_rule")
     if value_is_missing(source_text):
@@ -567,12 +561,12 @@ def render_comparison_table(row: pd.Series) -> None:
                 {html.escape(field_label)}
             </td>
             <td style="background:{bg}; padding:8px; vertical-align:top; border:1px solid #ddd;">
-                <div style="white-space:pre-wrap; max-height:220px; overflow:auto; font-family:monospace; font-size:0.84rem; line-height:1.42;">
+                <div style="white-space:pre-wrap; max-height:250px; overflow:auto; font-family:monospace; font-size:0.85rem; line-height:1.45;">
                     {rule_html}
                 </div>
             </td>
             <td style="background:{bg}; padding:8px; vertical-align:top; border:1px solid #ddd;">
-                <div style="white-space:pre-wrap; max-height:220px; overflow:auto; font-family:monospace; font-size:0.84rem; line-height:1.42;">
+                <div style="white-space:pre-wrap; max-height:250px; overflow:auto; font-family:monospace; font-size:0.85rem; line-height:1.45;">
                     {genai_html}
                 </div>
             </td>
@@ -583,9 +577,10 @@ def render_comparison_table(row: pd.Series) -> None:
     <!DOCTYPE html>
     <html>
     <body style="font-family: Arial, sans-serif; margin: 0; padding: 0;">
-        <div style="font-size:0.85rem; color:#666; margin-bottom:10px;">
+        <div style="font-size:0.9rem; color:#666; margin-bottom:10px;">
             Red text in the GenAI column = text not grounded in source.
         </div>
+
         <table style="width:100%; border-collapse:collapse; table-layout:fixed;">
             <thead>
                 <tr style="background:#f3f4f6;">
@@ -602,40 +597,44 @@ def render_comparison_table(row: pd.Series) -> None:
     </html>
     """
 
-    components.html(full_html, height=980, scrolling=True)
+    components.html(full_html, height=1200, scrolling=True)
 
 
-def render_presence_flags(row: pd.Series) -> None:
-    present = [f for f in PRESENCE_STATUS_FIELDS if f in row.index]
-    if not present:
-        return
+def render_diagnostics(row: pd.Series) -> None:
+    st.subheader("Row-Level Diagnostics")
 
-    st.markdown("#### Presence flags")
-    html_block = (
-        "<div style='display:flex;flex-wrap:wrap;gap:0.45rem;'>"
-        + "".join(
-            f"<div style='display:flex;flex-direction:column;gap:0.2rem;'>"
-            f"<div style='font-size:0.74rem;color:#666;'>{html.escape(field)}</div>"
-            f"{render_badge(row.get(field))}</div>"
-            for field in present
-        )
-        + "</div>"
-    )
-    st.markdown(html_block, unsafe_allow_html=True)
+    diag_cols = st.columns(len(DIAGNOSTIC_FIELDS))
+    for col, field in zip(diag_cols, DIAGNOSTIC_FIELDS):
+        with col:
+            st.caption(field)
+            value = row.get(field, "N/A")
+            st.code(pretty_value(value), language=None)
+
+    st.markdown("#### Presence Flags")
+    existing_presence_fields = [f for f in PRESENCE_STATUS_FIELDS if f in row.index]
+    if existing_presence_fields:
+        cols = st.columns(len(existing_presence_fields))
+        for col, field in zip(cols, existing_presence_fields):
+            with col:
+                st.caption(field)
+                st.markdown(status_badge(row.get(field)), unsafe_allow_html=True)
+    else:
+        st.info("No presence status fields available in this row.")
 
 
 # =========================================================
-# Main
+# Main app
 # =========================================================
 def main() -> None:
     init_state()
 
     st.title("Parser Output Qualitative Review")
+    st.caption("Local Streamlit app for auditing rule-based vs GenAI parser output from a JSONL file.")
 
     file_path = st.text_input(
         "JSONL path",
         value=str(DEFAULT_JSONL_PATH),
-        help="Local path or repo-relative path to the merged JSONL.",
+        help="Local path or repo-relative path to the merged JSONL used for auditing.",
     )
 
     try:
@@ -646,8 +645,34 @@ def main() -> None:
 
     df = df.reset_index(drop=False).rename(columns={"index": "__original_index__"})
 
+    st.subheader("Navigation & Search")
+
+    top1, top2, top3, top4 = st.columns([1.1, 1.1, 2, 3])
+
+    with top1:
+        prev_top = st.button("⬅ Previous", use_container_width=True)
+
+    with top2:
+        next_top = st.button("Next ➡", use_container_width=True)
+
+    with top3:
+        st.text_input(
+            "Jump by entry_id",
+            key="jump_entry_id_input",
+            placeholder="Enter exact entry_id",
+        )
+
+    with top4:
+        st.text_input(
+            "Search text",
+            key="search_text_input",
+            placeholder="Search source_text_rule / source_text_genai / headword_rule / headword_genai",
+        )
+
     filtered = apply_filters(df)
     filtered_total = len(filtered)
+
+    st.markdown(f"**Rows after filtering:** {filtered_total} / {len(df)}")
 
     if filtered_total == 0:
         st.warning("No rows match the current filters/search.")
@@ -661,17 +686,42 @@ def main() -> None:
 
     clamp_current_pos(filtered_total)
 
-    if st.session_state.get("prev_row_top"):
+    if prev_top:
         st.session_state.current_pos = max(0, st.session_state.current_pos - 1)
-    if st.session_state.get("next_row_top"):
+    if next_top:
         st.session_state.current_pos = min(filtered_total - 1, st.session_state.current_pos + 1)
+
+    nav_a, nav_b = st.columns([1, 1])
+    with nav_a:
+        prev_bottom = st.button("Previous row")
+    with nav_b:
+        next_bottom = st.button("Next row")
+
+    if prev_bottom:
+        st.session_state.current_pos = max(0, st.session_state.current_pos - 1)
+    if next_bottom:
+        st.session_state.current_pos = min(filtered_total - 1, st.session_state.current_pos + 1)
+
+    clamp_current_pos(filtered_total)
+
+    selected_pos = st.number_input(
+        "Row selector within filtered subset",
+        min_value=0,
+        max_value=max(filtered_total - 1, 0),
+        value=int(st.session_state.current_pos),
+        step=1,
+        help="This index is relative to the filtered subset.",
+    )
+
+    if int(selected_pos) != int(st.session_state.current_pos):
+        st.session_state.current_pos = int(selected_pos)
 
     clamp_current_pos(filtered_total)
 
     selected_row = filtered.iloc[st.session_state.current_pos]
     raw_index = selected_row["__original_index__"]
 
-    render_top_strip(
+    render_header(
         row=selected_row,
         filtered_position=st.session_state.current_pos,
         filtered_total=filtered_total,
@@ -685,7 +735,7 @@ def main() -> None:
     render_comparison_table(selected_row)
 
     st.divider()
-    render_presence_flags(selected_row)
+    render_diagnostics(selected_row)
 
 
 if __name__ == "__main__":
