@@ -318,7 +318,9 @@ if "selected_para_id" not in st.session_state:
 if "p5_index" not in st.session_state:
     st.session_state.p5_index = 0
 if "current_page" not in st.session_state:
-    st.session_state.current_page = "semantic"
+    st.session_state.current_page = "overview"
+if "sem_selected_pid" not in st.session_state:
+    st.session_state.sem_selected_pid = None
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Sidebar navigation
@@ -338,12 +340,12 @@ st.sidebar.markdown("""
 """, unsafe_allow_html=True)
 
 NAV_PAGES = [
-    ("semantic",   "Semantic Space",      "◉"),
     ("overview",   "Overview",            "○"),
     ("browser",    "Entry Browser",       "≡"),
     ("deepdive",   "Field Deep-Dive",     "⊞"),
     ("misclass",   "Misclassification",   "⚑"),
     ("annotation", "Source Annotation",   "◈"),
+    ("semantic",   "Semantic Space",      "◉"),
 ]
 
 # Inject CSS to style the nav buttons
@@ -1361,29 +1363,43 @@ Place the output `data/embeddings.json` in the `data/` folder, then reload the a
             mx = max(vals) if vals else 1
             return vals, "Viridis", (0, mx), "strata count"
 
-    # ── Build arrays ──────────────────────────────────────────────────────────
-    rb_x  = [e[_rb_key][0]  for e in filtered_sem]
-    rb_y  = [e[_rb_key][1]  for e in filtered_sem]
-    rb_z  = [e[_rb_key][2]  for e in filtered_sem]
-    llm_x = [e[_llm_key][0] for e in filtered_sem]
-    llm_y = [e[_llm_key][1] for e in filtered_sem]
-    llm_z = [e[_llm_key][2] for e in filtered_sem]
+    # ── Isolation: clicking a point filters the chart to just that entry ────────
+    _sel_pid = st.session_state.sem_selected_pid
+    if _sel_pid is not None:
+        _isolated = [e for e in filtered_sem if e.get("para_id") == _sel_pid]
+        display_sem = _isolated if _isolated else filtered_sem
+        is_isolated = bool(_isolated)
+    else:
+        display_sem = filtered_sem
+        is_isolated = False
 
-    headwords = [e.get("headword", "")       for e in filtered_sem]
-    para_ids  = [e.get("para_id", 0)         for e in filtered_sem]
-    agrees    = [e.get("agree_pct", 100)     for e in filtered_sem]
-    drifts    = [e.get(_drift_key, 0)        for e in filtered_sem]
-    rb_defs   = [e.get("rb_def",  "")[:80]  for e in filtered_sem]
-    llm_defs  = [e.get("llm_def", "")[:80]  for e in filtered_sem]
+    # ── Build arrays from display_sem ─────────────────────────────────────────
+    rb_x  = [e[_rb_key][0]  for e in display_sem]
+    rb_y  = [e[_rb_key][1]  for e in display_sem]
+    rb_z  = [e[_rb_key][2]  for e in display_sem]
+    llm_x = [e[_llm_key][0] for e in display_sem]
+    llm_y = [e[_llm_key][1] for e in display_sem]
+    llm_z = [e[_llm_key][2] for e in display_sem]
 
-    col_vals, col_scale, col_range, col_label = get_point_colours(filtered_sem, colour_by)
+    headwords = [e.get("headword", "")      for e in display_sem]
+    para_ids  = [e.get("para_id", 0)        for e in display_sem]
+    agrees    = [e.get("agree_pct", 100)    for e in display_sem]
+    drifts    = [e.get(_drift_key, 0)       for e in display_sem]
+    rb_defs   = [e.get("rb_def",  "")[:80] for e in display_sem]
+    llm_defs  = [e.get("llm_def", "")[:80] for e in display_sem]
 
-    highlight_mask = [
-        search_sem.lower() in hw.lower() if search_sem else False
-        for hw in headwords
-    ]
-    sizes_rb  = [10 if h else 4 for h in highlight_mask]
-    sizes_llm = [10 if h else 4 for h in highlight_mask]
+    col_vals, col_scale, col_range, col_label = get_point_colours(display_sem, colour_by)
+
+    if is_isolated:
+        # Single isolated point — large, fully opaque
+        sizes_rb = sizes_llm = [14]
+    else:
+        highlight_mask = [
+            search_sem.lower() in hw.lower() if search_sem else False
+            for hw in headwords
+        ]
+        sizes_rb  = [10 if h else 4 for h in highlight_mask]
+        sizes_llm = [10 if h else 4 for h in highlight_mask]
 
     # ── Build figure ──────────────────────────────────────────────────────────
     fig = go.Figure()
@@ -1400,7 +1416,7 @@ Place the output `data/embeddings.json` in the `data/` folder, then reload the a
             cmin=col_range[0],
             cmax=col_range[1],
             colorbar=dict(title=col_label, thickness=12),
-            opacity=0.85,
+            opacity=0.9,
             symbol="circle",
         ),
         customdata=list(zip(para_ids, headwords, rb_defs, agrees, drifts)),
@@ -1425,7 +1441,7 @@ Place the output `data/embeddings.json` in the `data/` folder, then reload the a
                 colorscale=col_scale,
                 cmin=col_range[0],
                 cmax=col_range[1],
-                opacity=0.65,
+                opacity=0.7,
                 symbol="diamond",
                 showscale=False,
             ),
@@ -1442,7 +1458,7 @@ Place the output `data/embeddings.json` in the `data/` folder, then reload the a
     # Trace 3 — Drift lines
     if show_drift and show_llm:
         lx, ly, lz = [], [], []
-        for i in range(len(filtered_sem)):
+        for i in range(len(display_sem)):
             lx += [rb_x[i], llm_x[i], None]
             ly += [rb_y[i], llm_y[i], None]
             lz += [rb_z[i], llm_z[i], None]
@@ -1469,7 +1485,18 @@ Place the output `data/embeddings.json` in the `data/` folder, then reload the a
             hoverinfo="skip",
         ))
 
+    _title = (
+        f"Semantic space [{projection}] — "
+        + (f"isolated (1 of {len(filtered_sem):,})" if is_isolated
+           else f"{len(filtered_sem):,} entries")
+        + (f" · {emb_meta.get('model', '')}" if emb_meta.get("model") else "")
+    )
+
     fig.update_layout(
+        # uirevision keeps the camera position when Streamlit reruns the page.
+        # Keyed on projection so rotating between UMAP/PCA resets the camera,
+        # but filter changes, clicks, and sidebar toggles do not.
+        uirevision=f"sem_{projection}",
         height=700,
         margin=dict(l=0, r=0, t=40, b=0),
         paper_bgcolor="rgba(0,0,0,0)",
@@ -1480,17 +1507,10 @@ Place the output `data/embeddings.json` in the `data/` folder, then reload the a
             bgcolor="rgba(248,249,250,1)",
         ),
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
-        title=dict(
-            text=(
-                f"Semantic space [{projection}] — {len(filtered_sem):,} entries"
-                + (f" · {emb_meta.get('model', '')}" if emb_meta.get("model") else "")
-            ),
-            font=dict(size=13),
-            x=0,
-        ),
+        title=dict(text=_title, font=dict(size=13), x=0),
     )
 
-    # PCA variance annotation (shown only in PCA mode)
+    # PCA variance annotation
     if projection == "PCA" and "pca_params" in emb_meta:
         pca_p = emb_meta["pca_params"]
         evr   = pca_p.get("explained_variance_ratio", [])
@@ -1503,30 +1523,64 @@ Place the output `data/embeddings.json` in the `data/` folder, then reload the a
                 f"(total {pca_p.get('total_explained_variance', 0)*100:.1f}%)"
             )
 
-    st.plotly_chart(fig, use_container_width=True)
+    # Clear isolation button (shown above chart when a point is isolated)
+    if is_isolated:
+        _cc, _ = st.columns([2, 8])
+        with _cc:
+            if st.button("✕ Clear selection", key="sem_clear"):
+                st.session_state.sem_selected_pid = None
+                st.rerun()
+
+    # Render chart with click handler.
+    # on_select="rerun" fires only when the user clicks a marker — drag-to-rotate
+    # does not trigger it.  uirevision (above) prevents the camera from resetting
+    # on each rerun, which is the main 3D navigation fix.
+    chart_event = st.plotly_chart(
+        fig,
+        use_container_width=True,
+        on_select="rerun",
+        selection_mode="points",
+    )
+
+    # Handle point click: isolate or deselect
+    if chart_event and chart_event.selection and chart_event.selection.get("points"):
+        clicked_pid = int(chart_event.selection["points"][0]["customdata"][0])
+        # Clicking the already-isolated point deselects it
+        new_pid = None if clicked_pid == _sel_pid else clicked_pid
+        if new_pid != _sel_pid:
+            st.session_state.sem_selected_pid = new_pid
+            st.rerun()
 
     # ── Stats row ─────────────────────────────────────────────────────────────
-    drift_label = f"Mean drift ({projection})"
     sc1, sc2, sc3, sc4 = st.columns(4)
-    sc1.metric("Entries shown", f"{len(filtered_sem):,}")
-    sc2.metric(drift_label,
-               f"{sum(drifts)/len(drifts):.4f}" if drifts else "—")
+    sc1.metric("Entries (filtered)", f"{len(filtered_sem):,}")
+    _d_all = [e.get(_drift_key, 0) for e in filtered_sem]
+    sc2.metric(f"Mean drift ({projection})",
+               f"{sum(_d_all)/len(_d_all):.4f}" if _d_all else "—")
     sc3.metric(f"Max drift ({projection})",
-               f"{max(drifts):.4f}" if drifts else "—")
+               f"{max(_d_all):.4f}" if _d_all else "—")
     sc4.metric("Model", emb_meta.get("model", "—"))
 
     # ── Entry inspector ───────────────────────────────────────────────────────
     st.markdown("---")
-    st.markdown("**Enter a para_id to inspect an entry:**")
 
-    sel_pid_sem = st.number_input(
-        "para_id", min_value=1, max_value=9999, value=1, step=1, key="sem_pid",
-    )
+    # Auto-populate from clicked point; manual number_input as fallback
+    _inspect_pid = _sel_pid
 
-    if sel_pid_sem and sel_pid_sem in entry_map:
-        sel_entry = entry_map[sel_pid_sem]
+    if not is_isolated:
+        st.markdown("**Click a point in the chart to inspect it, or enter a para_id:**")
+        _manual = st.number_input(
+            "para_id", min_value=1, max_value=9999, value=1, step=1, key="sem_pid",
+        )
+        if _manual and not _sel_pid:
+            _inspect_pid = _manual
+    else:
+        st.markdown(f"**Inspecting selected entry** — or [clear selection](#) above")
+
+    if _inspect_pid and _inspect_pid in entry_map:
+        sel_entry = entry_map[_inspect_pid]
         sel_emb   = next(
-            (e for e in emb_entries if e["para_id"] == sel_pid_sem), None
+            (e for e in emb_entries if e["para_id"] == _inspect_pid), None
         )
         hw_sel = sel_entry["rb"].get("headword") or ""
 
@@ -1535,7 +1589,7 @@ Place the output `data/embeddings.json` in the `data/` folder, then reload the a
             border-radius:8px;margin-bottom:12px;">
   <span style="font-size:1.2rem;font-weight:700;">{hw_sel}</span>
   <span style="opacity:0.5;font-size:0.8rem;margin-left:12px;">
-    para_id {sel_pid_sem}
+    para_id {_inspect_pid}
   </span>
 </div>
 """, unsafe_allow_html=True)
@@ -1554,11 +1608,10 @@ Place the output `data/embeddings.json` in the `data/` folder, then reload the a
         with col_meta:
             st.markdown("**Semantic metrics**")
             if sel_emb:
-                st.markdown(f"**Drift:** `{sel_emb.get('drift', 0):.4f}`")
-                st.markdown(
-                    f"**Drift percentile:** "
-                    f"`{sel_emb.get('drift_pct', 0) * 100:.1f}th`"
-                )
+                drift_v     = sel_emb.get(_drift_key, 0)
+                drift_pct_v = sel_emb.get(_drift_pct_key, 0)
+                st.markdown(f"**Drift ({projection}):** `{drift_v:.4f}`")
+                st.markdown(f"**Drift percentile:** `{drift_pct_v * 100:.1f}th`")
                 st.markdown("**RB definition:**")
                 st.info(sel_emb.get("rb_def", "—") or "—")
                 st.markdown("**LLM definition:**")
