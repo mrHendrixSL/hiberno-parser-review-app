@@ -1311,9 +1311,157 @@ Place the output `data/embeddings.json` in the `data/` folder, then reload the a
     emb_entries = embed_data["entries"]
     emb_meta    = embed_data.get("meta", {})
 
-    # ── Sidebar controls ──────────────────────────────────────────────────────
-    st.sidebar.markdown("### Display")
+    # ── Linguistic lenses ─────────────────────────────────────────────────────
+    LENSES = {
+        "all": {
+            "label":  "All entries",
+            "desc":   "All 3,899 dictionary entries in the semantic space.",
+            "filter": lambda e, em: True,
+        },
+        "perfect_agreement": {
+            "label":  "Perfect agreement (100%)",
+            "desc":   (
+                "Entries where both systems produced identical output across "
+                "all fields. These form the semantic baseline — both systems "
+                "agree completely. Expect tight RB/LLM point clustering."
+            ),
+            "filter": lambda e, em: e.get("agree_pct", 0) == 100,
+        },
+        "definition_diverges": {
+            "label":  "Definition diverges",
+            "desc":   (
+                "Entries where the definition field does not exactly match "
+                "between systems. The most linguistically interesting subset "
+                "— shows where field boundary decisions differ."
+            ),
+            "filter": lambda e, em: (
+                em.get(e["para_id"], {})
+                .get("comparison", {})
+                .get("exact_agreement", {})
+                .get("definition", True) == False
+            ) if e["para_id"] in em else False,
+        },
+        "boundary_errors": {
+            "label":  "Boundary errors (any misclassification)",
+            "desc":   (
+                "Entries flagged with at least one misclassification pattern: "
+                "etymology in definition, examples dropped, chained etymology "
+                "collapsed, or cross-reference missed. Shows where the LLM "
+                "placed real content in the wrong field."
+            ),
+            "filter": lambda e, em: (
+                em.get(e["para_id"], {})
+                .get("comparison", {})
+                .get("any_misclassification", False)
+            ) if e["para_id"] in em else False,
+        },
+        "irish_origin": {
+            "label":  "Irish origin (< Ir etymology)",
+            "desc":   (
+                "Entries whose etymology begins with '< Ir' — direct Irish "
+                "language borrowings. The largest single etymological group "
+                "in the dictionary."
+            ),
+            "filter": lambda e, em: (
+                str(
+                    em.get(e["para_id"], {})
+                    .get("rb", {})
+                    .get("etymology") or ""
+                ).startswith("< Ir")
+            ) if e["para_id"] in em else False,
+        },
+        "english_dialect": {
+            "label":  "English dialect origin (OE / ME / E dial)",
+            "desc":   (
+                "Entries with English dialect etymology — Old English, Middle "
+                "English, or English dialect. Contrasts with Irish-origin "
+                "entries in the semantic space."
+            ),
+            "filter": lambda e, em: bool(re.search(
+                r"<\s*(OE|ME|E dial)",
+                str(
+                    em.get(e["para_id"], {})
+                    .get("rb", {})
+                    .get("etymology") or ""
+                )
+            )) if e["para_id"] in em else False,
+        },
+        "who_adds": {
+            "label":  "Who-adds entries",
+            "desc":   (
+                "Entries containing informant editorial commentary "
+                "('who adds: ...'). These have the lowest example agreement "
+                "rate (37.7%) — the hardest boundary case in the dataset."
+            ),
+            "filter": lambda e, em: (
+                "who adds" in str(
+                    em.get(e["para_id"], {})
+                    .get("full_text") or ""
+                ).lower()
+            ) if e["para_id"] in em else False,
+        },
+        "numbered_senses": {
+            "label":  "Numbered senses",
+            "desc":   (
+                "Entries where the definition is a numbered list. Tests "
+                "whether the LLM correctly splits senses — one of the "
+                "more complex structural patterns."
+            ),
+            "filter": lambda e, em: isinstance(
+                em.get(e["para_id"], {})
+                .get("rb", {})
+                .get("definition"),
+                list
+            ) if e["para_id"] in em else False,
+        },
+        "worst_cases": {
+            "label":  "Worst agreement (< 70%)",
+            "desc":   (
+                "The 33 entries with overall field agreement below 70%. "
+                "The most divergent subset — largest semantic drift expected."
+            ),
+            "filter": lambda e, em: e.get("agree_pct", 100) < 70,
+        },
+        "kerry": {
+            "label":  "Kerry informants",
+            "desc":   (
+                "Entries with region mentions from Kerry — the most frequently "
+                "cited county in the dictionary. SOM (South of Munster) "
+                "informant entries."
+            ),
+            "filter": lambda e, em: any(
+                "kerry" in str(rm.get("county", "")).lower()
+                for rm in (
+                    em.get(e["para_id"], {})
+                    .get("rb", {})
+                    .get("region_mentions") or []
+                )
+            ) if e["para_id"] in em else False,
+        },
+        "ulster": {
+            "label":  "Ulster informants",
+            "desc":   (
+                "Entries with region mentions from Ulster counties — "
+                "Antrim, Down, Armagh, Tyrone, Derry, Fermanagh, Monaghan, "
+                "Cavan, Donegal. A distinct dialectal region."
+            ),
+            "filter": lambda e, em: any(
+                str(rm.get("county", "")).lower() in {
+                    "antrim", "down", "armagh", "tyrone", "derry",
+                    "fermanagh", "monaghan", "cavan", "donegal",
+                }
+                for rm in (
+                    em.get(e["para_id"], {})
+                    .get("rb", {})
+                    .get("region_mentions") or []
+                )
+            ) if e["para_id"] in em else False,
+        },
+    }
 
+    # ── Sidebar controls ──────────────────────────────────────────────────────
+
+    # Projection (kept at top, before lenses)
     # Detect whether this file has PCA coords (new format)
     _has_pca = bool(embed_data["entries"] and "rb_pca" in embed_data["entries"][0])
 
@@ -1324,22 +1472,31 @@ Place the output `data/embeddings.json` in the `data/` folder, then reload the a
         key="sem_proj",
     )
 
+    st.sidebar.markdown("### Lens")
+    lens_options = {v["label"]: k for k, v in LENSES.items()}
+    sel_lens_label = st.sidebar.selectbox(
+        "View",
+        list(lens_options.keys()),
+        key="sem_lens",
+    )
+    sel_lens = lens_options[sel_lens_label]
+    st.sidebar.caption(LENSES[sel_lens]["desc"])
+
+    st.sidebar.markdown("### Display")
+
     show_llm   = st.sidebar.toggle("Show LLM points",  value=True,  key="sem_show_llm")
     show_drift = st.sidebar.toggle("Show drift lines", value=False, key="sem_drift",
                                    disabled=not show_llm)
 
     colour_by = st.sidebar.selectbox(
-        "Colour points by",
-        ["agree_pct", "drift", "stratum", "entry_type"],
+        "Colour by",
+        ["agree_pct", "drift", "entry_type", "strata"],
         key="sem_colour",
     )
 
-    st.sidebar.markdown("### Filter")
+    st.sidebar.markdown("### Refine")
 
-    all_strata_sem = sorted({s for e in emb_entries for s in e.get("strata", [])})
-    sel_strata_sem = st.sidebar.multiselect("Strata", all_strata_sem, key="sem_strata")
-
-    min_agree_sem  = st.sidebar.slider("Min agree_pct", 0, 100, 0, key="sem_agree")
+    min_agree_sem   = st.sidebar.slider("Min agree_pct", 0, 100, 0, key="sem_agree")
     drift_pct_range = st.sidebar.slider("Drift percentile range", 0, 100, (0, 100),
                                         key="sem_drift_range")
     search_sem = st.sidebar.text_input("Highlight headword", key="sem_search")
@@ -1354,22 +1511,17 @@ Place the output `data/embeddings.json` in the `data/` folder, then reload the a
     else:
         drift_line_colour = "drift magnitude"
 
-    # ── Filter ────────────────────────────────────────────────────────────────
-    filtered_sem = emb_entries
+    # ── Filter — lens first, secondary filters second ─────────────────────────
+    # Use projection-specific drift percentile key (set before filtering)
+    _drift_pct_key = "drift_pca_pct" if projection == "PCA" else "drift_pct"
 
-    if sel_strata_sem:
-        filtered_sem = [
-            e for e in filtered_sem
-            if any(s in e.get("strata", []) for s in sel_strata_sem)
-        ]
+    lens_fn      = LENSES[sel_lens]["filter"]
+    filtered_sem = [e for e in emb_entries if lens_fn(e, entry_map)]
 
     filtered_sem = [
         e for e in filtered_sem
         if e.get("agree_pct", 100) >= min_agree_sem
     ]
-
-    # Use projection-specific drift percentile for the slider filter
-    _drift_pct_key = "drift_pca_pct" if projection == "PCA" else "drift_pct"
 
     dlo = drift_pct_range[0] / 100
     dhi = drift_pct_range[1] / 100
@@ -1379,7 +1531,10 @@ Place the output `data/embeddings.json` in the `data/` folder, then reload the a
     ]
 
     if not filtered_sem:
-        st.warning("No entries match the current filters.")
+        st.warning(
+            f"No entries match lens '{LENSES[sel_lens]['label']}' "
+            "with the current secondary filters."
+        )
         st.stop()
 
     # ── Projection-specific coordinate and drift keys ─────────────────────────
@@ -1395,23 +1550,27 @@ Place the output `data/embeddings.json` in the `data/` folder, then reload the a
         _llm_key   = "llm_umap" if "llm_umap" in _first else "llm_xyz"
         _drift_key = "drift"
 
-    # ── Colour scale logic ────────────────────────────────────────────────────
+    # ── Colour scale logic (dynamic min/max from filtered data) ──────────────
     def get_point_colours(ents, cb):
         if cb == "agree_pct":
             vals = [e.get("agree_pct", 100) for e in ents]
-            return vals, "RdYlGn", (0, 100), "agree %"
+            lo   = max(0,   min(vals) - 2) if vals else 0
+            hi   = min(100, max(vals) + 2) if vals else 100
+            return vals, "RdYlGn", (lo, hi), "agree %"
         elif cb == "drift":
             vals = [e.get(_drift_key, 0) for e in ents]
-            mn, mx = min(vals), max(vals)
-            return vals, "RdYlGn_r", (mn, mx), "drift"
+            lo   = min(vals) if vals else 0
+            hi   = max(vals) if vals else 1
+            return vals, "RdYlGn_r", (lo, hi), "drift"
         elif cb == "entry_type":
             type_map = {"full": 1, "cross_ref": 0}
             vals = [type_map.get(e.get("entry_type", "full"), 1) for e in ents]
             return vals, "RdBu", (0, 1), "type"
-        else:  # stratum count
+        else:  # strata count
             vals = [len(e.get("strata", [])) for e in ents]
-            mx = max(vals) if vals else 1
-            return vals, "Viridis", (0, mx), "strata count"
+            lo   = min(vals) if vals else 0
+            hi   = max(vals) if vals else 1
+            return vals, "Viridis", (lo, hi), "strata count"
 
     # ── Isolation: clicking a point filters the chart to just that entry ────────
     _sel_pid = st.session_state.sem_selected_pid
@@ -1506,32 +1665,37 @@ Place the output `data/embeddings.json` in the `data/` folder, then reload the a
         ))
 
     # Trace 3 — Drift lines
-    if show_drift and show_llm:
+    if show_drift and show_llm and drifts:
         lx, ly, lz = [], [], []
         for i in range(len(display_sem)):
             lx += [rb_x[i], llm_x[i], None]
             ly += [rb_y[i], llm_y[i], None]
             lz += [rb_z[i], llm_z[i], None]
 
-        mean_d = sum(drifts) / len(drifts) if drifts else 0
-        max_d  = max(drifts) if drifts else 1
-        r = int(255 * mean_d / max_d)
-        g = int(255 * (1 - mean_d / max_d))
-        line_col = f"rgba({r},{g},0,0.35)"
+        max_d = max(drifts) if max(drifts) > 0 else 1
+        min_d = min(drifts)
 
-        if drift_line_colour == "agree_pct":
+        if drift_line_colour == "drift magnitude":
+            # blue (low drift) → red (high drift); mean as representative colour
+            span = max_d - min_d if max_d > min_d else 1
+            norm = (sum(drifts) / len(drifts) - min_d) / span
+            r = int(220 * norm)
+            b = int(220 * (1 - norm))
+            line_col = f"rgba({r},100,{b},0.45)"
+        elif drift_line_colour == "agree_pct":
+            # green = high agreement, red = low agreement
             mean_a = sum(agrees) / len(agrees) if agrees else 100
-            r2 = int(255 * (1 - mean_a / 100))
-            g2 = int(255 * mean_a / 100)
-            line_col = f"rgba({r2},{g2},0,0.35)"
-        elif drift_line_colour == "uniform grey":
-            line_col = "rgba(128,128,128,0.3)"
+            r = int(220 * (1 - mean_a / 100))
+            g = int(180 * (mean_a / 100))
+            line_col = f"rgba({r},{g},80,0.45)"
+        else:  # uniform grey
+            line_col = "rgba(160,160,160,0.35)"
 
         fig.add_trace(go.Scatter3d(
             x=lx, y=ly, z=lz,
             mode="lines",
             name="Drift",
-            line=dict(color=line_col, width=1),
+            line=dict(color=line_col, width=1.5),
             hoverinfo="skip",
         ))
 
@@ -1590,6 +1754,12 @@ Place the output `data/embeddings.json` in the `data/` folder, then reload the a
         use_container_width=True,
         on_select="rerun",
         selection_mode="points",
+    )
+
+    st.caption(
+        f"Lens: {LENSES[sel_lens]['label']} · "
+        f"{len(filtered_sem):,} entries shown"
+        + (f" · highlighting '{search_sem}'" if search_sem else "")
     )
 
     # Handle point click: isolate or deselect
