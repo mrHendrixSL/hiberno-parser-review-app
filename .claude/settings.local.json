@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python3 -c \"import json; d=json.load\\(open\\('d:/Experiments/Hiberno_english_Dictonary_streamlit/hiberno-parser-review-app/data/comparison.json'\\)\\); print\\('Keys:', list\\(d.keys\\(\\)\\)\\); print\\('Entries count:', len\\(d.get\\('entries', []\\)\\)\\); print\\('Meta:', d.get\\('meta', {}\\)\\); agg=d.get\\('aggregate', {}\\); print\\('Aggregate keys:', list\\(agg.keys\\(\\)\\)\\); print\\('Classification disagreements count:', len\\(d.get\\('classification_disagreements', []\\)\\)\\)\")",
+      "Bash(python -c \"import json; d=json.load\\(open\\('d:/Experiments/Hiberno_english_Dictonary_streamlit/hiberno-parser-review-app/data/comparison.json'\\)\\); print\\('Keys:', list\\(d.keys\\(\\)\\)\\); print\\('Entries count:', len\\(d.get\\('entries', []\\)\\)\\); print\\('Meta:', d.get\\('meta', {}\\)\\); agg=d.get\\('aggregate', {}\\); print\\('Aggregate keys:', list\\(agg.keys\\(\\)\\)\\); print\\('Classification disagreements count:', len\\(d.get\\('classification_disagreements', []\\)\\)\\)\")",
+      "Bash(python -c ' *)"
+    ]
+  }
+}

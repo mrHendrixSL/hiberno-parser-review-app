@@ -1,742 +1,1089 @@
-import html
+"""
+Hiberno-English Lexical Extraction — Streamlit review app
+Comparing Rule-Based vs LLM extraction on A Dictionary of Hiberno-English (Dolan, 2006).
+"""
+
 import json
 import re
-from difflib import SequenceMatcher
-from pathlib import Path
-from typing import Any, List, Optional
-
+import unicodedata
+import os
 import pandas as pd
 import streamlit as st
-import streamlit.components.v1 as components
+import plotly.graph_objects as go
 
-# =========================================================
-# Config
-# =========================================================
-DEFAULT_JSONL_PATH = Path("data/normalized_withhallucinationFlags.jsonl")
-if not DEFAULT_JSONL_PATH.exists():
-    DEFAULT_JSONL_PATH = Path(
-        r"D:\Experiments\Hiberno_English_Dictonary\final_merged_normalized_withhallucinationFlags.jsonl"
-    )
+# ─────────────────────────────────────────────────────────────────────────────
+# Configuration
+# ─────────────────────────────────────────────────────────────────────────────
 
 st.set_page_config(
-    page_title="Parser Output Qualitative Review",
     layout="wide",
-    initial_sidebar_state="expanded",
+    page_title="Hiberno-English Lexical Extraction",
 )
 
-# =========================================================
-# Constants
-# =========================================================
-MATCH_FIELDS = [
-    "source_text_match",
-    "pos_match_norm",
-    "region_mentions_match_norm",
+DATA_PATH = os.path.join(os.path.dirname(__file__), "data", "comparison.json")
+
+CONTENT_FIELDS = [
+    "headword", "headword_raw", "homonym_index", "variant_forms",
+    "pronunciation", "pronunciation_2", "pronunciation_3",
+    "part_of_speech", "grammatical_labels", "definition",
+    "etymology", "cross_references", "examples", "region_mentions",
 ]
 
-FILTER_FIELDS = [
-    "_merge",
-    "source_text_match",
-    "pos_match_norm",
-    "region_mentions_match_norm",
-    "rule_possible_hallucination",
-    "genai_possible_hallucination",
-    "examples_presence_status",
-    "etymology_presence_status",
-    "cross_references_presence_status",
-    "region_mentions_presence_status",
+STRATA = [
+    "stratum_high_confidence", "stratum_medium_confidence", "stratum_low_confidence",
+    "stratum_numbered_senses", "stratum_who_adds", "stratum_multi_pronunciation",
+    "stratum_variant_forms", "stratum_with_etymology", "stratum_multi_region",
+    "stratum_long_definition",
 ]
 
-PRESENCE_STATUS_FIELDS = [
-    "headword_presence_status",
-    "pronunciations_presence_status",
-    "part_of_speech_presence_status",
-    "definition_presence_status",
-    "examples_presence_status",
-    "etymology_presence_status",
-    "cross_references_presence_status",
-    "region_mentions_presence_status",
+MISCLASS_FLAGS = [
+    "misclass_etym_in_definition",
+    "misclass_examples_in_definition",
+    "misclass_chained_etym_collapsed",
+    "misclass_examples_dropped",
+    "misclass_numbered_senses_not_split",
+    "misclass_cross_ref_missed",
 ]
 
-DIAGNOSTIC_FIELDS = [
-    "source_char_len",
-    "rule_extracted_char_len",
-    "genai_extracted_char_len",
-    "rule_char_ratio",
-    "genai_char_ratio",
-]
-
-COMPARISON_ROWS = [
-    ("headword_raw", "headword_raw_rule", "headword_raw_genai"),
-    ("headword", "headword_rule", "headword_genai"),
-    ("variant_forms_raw", "variant_forms_raw_rule", "variant_forms_raw_genai"),
-    ("variant_forms", "variant_forms_rule", "variant_forms_genai"),
-    ("pronunciations", "pronunciations_rule", "pronunciations_genai"),
-    ("part_of_speech", "part_of_speech_rule", "part_of_speech_genai"),
-    ("part_of_speech_norm", "part_of_speech_rule_norm", "part_of_speech_genai_norm"),
-    ("definition", "definition_rule", "definition_genai"),
-    ("examples", "examples_rule", "examples_genai"),
-    ("etymology", "etymology_rule", "etymology_genai"),
-    ("cross_references", "cross_references_rule", "cross_references_genai"),
-    ("region_mentions", "region_mentions_rule", "region_mentions_genai"),
-    ("region_mentions_norm", "region_mentions_rule_norm", "region_mentions_genai_norm"),
-]
-
-GENAI_HIGHLIGHT_FIELDS = {
-    "headword_raw_genai",
-    "headword_genai",
-    "variant_forms_raw_genai",
-    "variant_forms_genai",
-    "pronunciations_genai",
-    "part_of_speech_genai",
-    "part_of_speech_genai_norm",
-    "definition_genai",
-    "examples_genai",
-    "etymology_genai",
-    "cross_references_genai",
-    "region_mentions_genai",
-    "region_mentions_genai_norm",
+MISCLASS_DESCRIPTIONS = {
+    "misclass_etym_in_definition": (
+        "LLM placed etymology content (< language marker) inside "
+        "the definition field instead of the etymology field."
+    ),
+    "misclass_examples_in_definition": (
+        "LLM definition contains a single-quoted string while the "
+        "rule-based parser has examples. Many of these are legitimate "
+        "— definitions like 'in the phrase X' are normal for this "
+        "dictionary. Manual review needed to distinguish true errors."
+    ),
+    "misclass_chained_etym_collapsed": (
+        "Rule-based etymology has multiple < markers (chained sources) "
+        "but LLM only captured the first. e.g. '< Ir. < Ir a mhuirnín.' "
+        "collapsed to '< Ir.'"
+    ),
+    "misclass_examples_dropped": (
+        "Rule-based has examples but LLM returned null. Often occurs "
+        "when examples are embedded in EDD citations or 'in such "
+        "phrases as' constructions."
+    ),
+    "misclass_numbered_senses_not_split": (
+        "Rule-based definition is a list (numbered senses) but LLM "
+        "returned a single string."
+    ),
+    "misclass_cross_ref_missed": (
+        "Rule-based has cross_references but LLM returned null. "
+        "Often when 'See X.' appears mid-entry rather than at the end."
+    ),
 }
 
+# Colour palette
+COLOR_RB    = "#1f77b4"
+COLOR_LLM   = "#ff7f0e"
+COLOR_MATCH = "#2ca02c"
+COLOR_NOMATCH = "#d62728"
 
-# =========================================================
-# State
-# =========================================================
-def init_state() -> None:
-    defaults = {
-        "current_pos": 0,
-        "jump_entry_id_input": "",
-        "search_text_input": "",
-    }
-    for key, value in defaults.items():
-        if key not in st.session_state:
-            st.session_state[key] = value
+STOPWORDS = {
+    "see", "also", "the", "and", "of", "in", "to", "for", "or",
+    "as", "is", "an", "on", "at", "by", "it", "its", "from",
+    "with", "this", "that", "was", "be", "are", "used", "who",
+    "adds", "one", "he", "she", "his", "her", "they", "them",
+    "their", "not", "no", "but", "if", "so", "up",
+}
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Normalisation helpers
+# ─────────────────────────────────────────────────────────────────────────────
 
-# =========================================================
-# Data loading
-# =========================================================
-@st.cache_data(show_spinner=True)
-def load_jsonl(path_str: str) -> pd.DataFrame:
-    path = Path(path_str)
-
-    if not path.exists():
-        raise FileNotFoundError(f"JSONL file not found: {path}")
-
-    records: List[dict] = []
-    with path.open("r", encoding="utf-8") as f:
-        for line_num, line in enumerate(f, start=1):
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                records.append(json.loads(line))
-            except json.JSONDecodeError as e:
-                raise ValueError(f"Invalid JSON on line {line_num}: {e}") from e
-
-    df = pd.DataFrame(records)
-    if df.empty:
-        raise ValueError("The JSONL file was loaded, but it contains no rows.")
-
-    return df
-
-
-# =========================================================
-# Generic helpers
-# =========================================================
-def value_is_missing(value: Any) -> bool:
-    if value is None:
-        return True
+def normalise(value) -> str:
+    """Flatten any field value to a comparable lowercase string."""
     try:
-        if pd.isna(value):
-            return True
+        if value is None:
+            s = ""
+        elif isinstance(value, list):
+            parts = []
+            for item in value:
+                if isinstance(item, dict):
+                    parts.append(" ".join(str(v) for v in item.values()))
+                else:
+                    parts.append(str(item))
+            s = " ".join(sorted(parts))
+        elif isinstance(value, dict):
+            s = " ".join(str(v) for v in value.values())
+        else:
+            s = str(value)
+
+        # Normalise fullwidth Unicode
+        s = "".join(
+            chr(ord(c) - 0xFEE0) if 0xFF01 <= ord(c) <= 0xFF5E else c
+            for c in s
+        )
+        # Strip diacritics
+        s = unicodedata.normalize("NFD", s)
+        s = "".join(c for c in s if unicodedata.category(c) != "Mn")
+        s = s.lower()
+        s = re.sub(r"[^\w\s]", " ", s)
+        s = re.sub(r"\s+", " ", s).strip()
+        return s
     except Exception:
-        pass
-    return False
+        return ""
 
 
-def pretty_value(value: Any) -> str:
-    if value_is_missing(value):
-        return "∅"
+def get_tokens(value) -> set:
+    """Return meaningful tokens from a field value."""
+    return {
+        t for t in normalise(value).split()
+        if len(t) > 2 and not t.isdigit()
+    }
 
-    if isinstance(value, (dict, list)):
-        try:
-            return json.dumps(value, indent=2, ensure_ascii=False)
-        except Exception:
-            return str(value)
 
-    if isinstance(value, str):
-        stripped = value.strip()
-        if stripped and (
-            (stripped.startswith("{") and stripped.endswith("}"))
-            or (stripped.startswith("[") and stripped.endswith("]"))
-        ):
-            try:
-                parsed = json.loads(stripped)
-                return json.dumps(parsed, indent=2, ensure_ascii=False)
-            except Exception:
-                return value
-        return value
-
+def display_value(value) -> str:
+    """Human-readable display of a field value."""
+    if value is None:
+        return "—"
+    if isinstance(value, list):
+        if not value:
+            return "—"
+        if value and isinstance(value[0], dict):
+            # region_mentions style
+            parts = []
+            for item in value:
+                informant = item.get("informant", "")
+                county = item.get("county", "")
+                parts.append(f"{informant} ({county})" if county else informant)
+            return "; ".join(parts)
+        return ", ".join(str(v) for v in value)
     return str(value)
 
 
-def normalize_scalar_for_search(value: Any) -> str:
-    if value_is_missing(value):
-        return ""
-    if isinstance(value, (dict, list)):
-        try:
-            return json.dumps(value, ensure_ascii=False).lower()
-        except Exception:
-            return str(value).lower()
-    return str(value).lower()
+def strip_prefix(s: str, prefix: str) -> str:
+    if s.startswith(prefix):
+        s = s[len(prefix):]
+    return s.replace("_", " ")
 
 
-def value_equal(a: Any, b: Any) -> bool:
-    if value_is_missing(a) and value_is_missing(b):
-        return True
-    return pretty_value(a) == pretty_value(b)
+def fmt_stratum(s: str) -> str:
+    return strip_prefix(s, "stratum_")
 
 
-def is_false_like(value: Any) -> bool:
-    if isinstance(value, bool):
-        return value is False
-    if value_is_missing(value):
-        return False
-    v = str(value).strip().lower()
-    return v in {"false", "0", "no", "mismatch", "different", "not_match", "not matched"}
+def fmt_misclass(s: str) -> str:
+    return strip_prefix(s, "misclass_")
 
 
-def status_badge(value: Any) -> str:
-    if value_is_missing(value):
-        label = "missing"
-        color = "#6b7280"
-    else:
-        text = str(value).strip()
-        lower = text.lower()
+# ─────────────────────────────────────────────────────────────────────────────
+# Data loading
+# ─────────────────────────────────────────────────────────────────────────────
 
-        green_values = {"true", "match", "matched", "both_present", "present", "ok", "yes"}
-        yellow_values = {
-            "partial",
-            "one_sided",
-            "one-sided",
-            "rule_only",
-            "genai_only",
-            "only_rule",
-            "only_genai",
-            "left_only",
-            "right_only",
-        }
-        red_values = {"false", "mismatch", "different", "hallucination", "flagged", "error", "conflict"}
-        grey_values = {"both_missing", "missing", "none", "null", ""}
+@st.cache_data
+def load_data():
+    with open(DATA_PATH, encoding="utf-8") as f:
+        data = json.load(f)
 
-        if lower in green_values:
-            label, color = text, "#15803d"
-        elif lower in yellow_values:
-            label, color = text, "#ca8a04"
-        elif lower in red_values:
-            label, color = text, "#b91c1c"
-        elif lower in grey_values:
-            label, color = (text if text else "missing"), "#6b7280"
-        elif isinstance(value, bool):
-            label, color = text, "#15803d" if value else "#b91c1c"
-        else:
-            if "match" in lower or "both_present" in lower:
-                label, color = text, "#15803d"
-            elif "partial" in lower or "only" in lower:
-                label, color = text, "#ca8a04"
-            elif "mismatch" in lower or "halluc" in lower or lower == "false":
-                label, color = text, "#b91c1c"
-            elif "missing" in lower:
-                label, color = text, "#6b7280"
-            else:
-                label, color = text, "#374151"
+    entries = data["entries"]
 
-    return (
-        f"<span style='display:inline-block;padding:0.2rem 0.55rem;"
-        f"border-radius:999px;background:{color};color:white;font-size:0.82rem;"
-        f"font-weight:600;white-space:nowrap;'>{html.escape(label)}</span>"
+    # Build headword index sorted alphabetically
+    hw_index = sorted(
+        [
+            {
+                "para_id": e["para_id"],
+                "headword": e["rb"].get("headword") or e["llm"].get("headword") or "",
+                "headword_raw": e["rb"].get("headword_raw") or "",
+            }
+            for e in entries
+        ],
+        key=lambda x: x["headword"].lower() if x["headword"] else "",
     )
 
+    # Build a para_id → entry dict for fast lookup
+    entry_map = {e["para_id"]: e for e in entries}
 
-# =========================================================
-# Search / filtering
-# =========================================================
-def search_mask(df: pd.DataFrame, query: str) -> pd.Series:
-    if not query.strip():
-        return pd.Series(True, index=df.index)
+    return data, hw_index, entry_map
 
-    query_l = query.lower().strip()
-    search_cols = [
-        "source_text_rule",
-        "source_text_genai",
-        "headword_rule",
-        "headword_genai",
+
+data, hw_index, entry_map = load_data()
+aggregate = data["aggregate"]
+entries = data["entries"]
+classification_disagreements = data.get("classification_disagreements", [])
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Token annotation (Page 5)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def annotate_tokens(full_text: str, rb: dict, llm: dict) -> list:
+    """Annotate each whitespace-delimited token in full_text with a colour."""
+    # Build lookup sets from all content fields
+    rb_tokens: set = set()
+    llm_tokens: set = set()
+    for f in CONTENT_FIELDS:
+        rb_tokens |= get_tokens(rb.get(f))
+        llm_tokens |= get_tokens(llm.get(f))
+
+    result = []
+    for token in full_text.split():
+        norm = normalise(token)
+        rb_found  = norm in rb_tokens
+        llm_found = norm in llm_tokens
+        is_stop   = norm in STOPWORDS or len(norm) <= 2 or norm.isdigit()
+
+        if is_stop:
+            colour = "stop"
+        elif rb_found and llm_found:
+            colour = "both"
+        elif rb_found:
+            colour = "rb"
+        elif llm_found:
+            colour = "llm"
+        else:
+            colour = "miss"
+
+        result.append({"token": token, "norm": norm, "colour": colour})
+    return result
+
+
+TOKEN_STYLES = {
+    "both": "background:#d4edda;color:#155724;padding:1px 4px;border-radius:3px;",
+    "rb":   "background:#cce5ff;color:#004085;padding:1px 4px;border-radius:3px;",
+    "llm":  "background:#fff3cd;color:#856404;padding:1px 4px;border-radius:3px;",
+    "miss": "background:#f8d7da;color:#721c24;padding:1px 4px;border-radius:3px;",
+    "stop": "color:#999;font-size:0.85em;",
+}
+
+LEGEND_HTML = (
+    '<span style="background:#d4edda;color:#155724;padding:1px 6px;border-radius:3px;margin-right:6px;">■ Both systems</span>'
+    '<span style="background:#cce5ff;color:#004085;padding:1px 6px;border-radius:3px;margin-right:6px;">■ Rule-based only</span>'
+    '<span style="background:#fff3cd;color:#856404;padding:1px 6px;border-radius:3px;margin-right:6px;">■ LLM only</span>'
+    '<span style="background:#f8d7da;color:#721c24;padding:1px 6px;border-radius:3px;margin-right:6px;">■ Neither</span>'
+    '<span style="color:#999;font-size:0.85em;">· stopword</span>'
+)
+
+
+def render_tokens_html(annotated: list) -> str:
+    parts = []
+    for item in annotated:
+        style = TOKEN_STYLES[item["colour"]]
+        parts.append(f'<span style="{style}">{item["token"]}</span>')
+    return '<p style="line-height:2.2;word-wrap:break-word;">' + " ".join(parts) + "</p>"
+
+
+def render_field_tokens_html(value, rb_tokens: set, llm_tokens: set) -> str:
+    """Render a field value with token colouring based on cross-system overlap."""
+    text = display_value(value)
+    if text == "—":
+        return '<span style="color:#999;">—</span>'
+    parts = []
+    for token in text.split():
+        norm = normalise(token)
+        rb_found  = norm in rb_tokens
+        llm_found = norm in llm_tokens
+        is_stop   = norm in STOPWORDS or len(norm) <= 2 or norm.isdigit()
+        if is_stop:
+            colour = "stop"
+        elif rb_found and llm_found:
+            colour = "both"
+        elif rb_found:
+            colour = "rb"
+        elif llm_found:
+            colour = "llm"
+        else:
+            colour = "miss"
+        style = TOKEN_STYLES[colour]
+        parts.append(f'<span style="{style}">{token}</span>')
+    return '<span style="line-height:2.2;">' + " ".join(parts) + "</span>"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Session state initialisation
+# ─────────────────────────────────────────────────────────────────────────────
+
+if "selected_para_id" not in st.session_state:
+    st.session_state.selected_para_id = None
+if "p5_index" not in st.session_state:
+    st.session_state.p5_index = 0
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Sidebar navigation
+# ─────────────────────────────────────────────────────────────────────────────
+
+st.sidebar.title("Hiberno-English\nLexical Extraction")
+st.sidebar.markdown("---")
+
+page = st.sidebar.radio(
+    "Navigate",
+    [
+        "1 · Overview",
+        "2 · Entry Browser",
+        "3 · Field Deep-Dive",
+        "4 · Misclassification Inspector",
+        "5 · Source Annotation",
+    ],
+)
+
+# ─────────────────────────────────────────────────────────────────────────────
+# PAGE 1 — Overview
+# ─────────────────────────────────────────────────────────────────────────────
+
+if page == "1 · Overview":
+    st.title("Overview")
+
+    ea = aggregate["exact_agreement_pct"]
+    cov = aggregate["coverage"]
+    n_fields = len(CONTENT_FIELDS)
+    fields_ge90 = sum(1 for v in ea.values() if v >= 90)
+    fields_lt80 = sum(1 for v in ea.values() if v < 80)
+
+    # Row 1: metric cards
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Entries Evaluated", f"{len(entries):,}")
+    c2.metric("Mean LLM Token Coverage", f"{cov['mean_llm_coverage_pct']:.1f}%")
+    c3.metric(f"Fields ≥90% Exact Agreement", f"{fields_ge90} / {n_fields}")
+    c4.metric(f"Fields <80% Exact Agreement", f"{fields_lt80} / {n_fields}")
+
+    st.markdown("---")
+
+    # Row 2: Exact agreement bar chart
+    st.subheader("Exact Agreement by Field")
+    sorted_fields = sorted(CONTENT_FIELDS, key=lambda f: ea.get(f, 0))
+    bar_vals = [ea.get(f, 0) for f in sorted_fields]
+    bar_labels = [f.replace("_", " ") for f in sorted_fields]
+    bar_colors = [
+        COLOR_MATCH if v >= 90 else ("#ff7f0e" if v >= 80 else COLOR_NOMATCH)
+        for v in bar_vals
     ]
-    existing_cols = [c for c in search_cols if c in df.columns]
-    if not existing_cols:
-        return pd.Series(True, index=df.index)
 
-    combined = pd.Series("", index=df.index, dtype="object")
-    for col in existing_cols:
-        combined = combined + " " + df[col].apply(normalize_scalar_for_search)
+    fig_ea = go.Figure(go.Bar(
+        x=bar_vals,
+        y=bar_labels,
+        orientation="h",
+        marker_color=bar_colors,
+        text=[f"{v:.1f}%" for v in bar_vals],
+        textposition="outside",
+    ))
+    fig_ea.add_vline(x=80, line_dash="dash", line_color=COLOR_NOMATCH,
+                     annotation_text="80%", annotation_position="top right")
+    fig_ea.update_layout(
+        height=420,
+        margin=dict(l=10, r=60, t=20, b=20),
+        xaxis=dict(range=[0, 108], title="Exact Agreement %"),
+        yaxis=dict(title=""),
+        showlegend=False,
+    )
+    st.plotly_chart(fig_ea, use_container_width=True)
 
-    return combined.str.contains(query_l, na=False, regex=False)
+    st.markdown("---")
+
+    # Row 3: Coverage + Misclassification
+    col_left, col_right = st.columns(2)
+
+    with col_left:
+        st.subheader("Source Coverage")
+        fig_cov = go.Figure()
+        fig_cov.add_trace(go.Bar(
+            name="Rule-Based",
+            x=["Token Coverage", "Char Coverage"],
+            y=[cov["mean_rb_coverage_pct"], cov["mean_rb_char_pct"]],
+            marker_color=COLOR_RB,
+            text=[f"{cov['mean_rb_coverage_pct']:.2f}%", f"{cov['mean_rb_char_pct']:.2f}%"],
+            textposition="outside",
+        ))
+        fig_cov.add_trace(go.Bar(
+            name="LLM",
+            x=["Token Coverage", "Char Coverage"],
+            y=[cov["mean_llm_coverage_pct"], cov["mean_llm_char_pct"]],
+            marker_color=COLOR_LLM,
+            text=[f"{cov['mean_llm_coverage_pct']:.2f}%", f"{cov['mean_llm_char_pct']:.2f}%"],
+            textposition="outside",
+        ))
+        fig_cov.update_layout(
+            barmode="group",
+            yaxis=dict(range=[92, 101.5], title="Coverage %"),
+            height=340,
+            margin=dict(l=10, r=10, t=20, b=20),
+            legend=dict(orientation="h", y=1.1),
+        )
+        st.plotly_chart(fig_cov, use_container_width=True)
+
+    with col_right:
+        st.subheader("Misclassification Counts")
+        mc = aggregate["misclassification_counts"]
+        mc_items = [(k, v) for k, v in mc.items() if k != "misclass_any"]
+        mc_items_sorted = sorted(mc_items, key=lambda x: x[1], reverse=True)
+        mc_labels = [fmt_misclass(k) for k, _ in mc_items_sorted]
+        mc_vals   = [v for _, v in mc_items_sorted]
+        fig_mc = go.Figure(go.Bar(
+            x=mc_vals,
+            y=mc_labels,
+            orientation="h",
+            marker_color=COLOR_NOMATCH,
+            text=mc_vals,
+            textposition="outside",
+        ))
+        fig_mc.update_layout(
+            height=340,
+            margin=dict(l=10, r=40, t=20, b=20),
+            xaxis=dict(title="Count"),
+            yaxis=dict(title=""),
+        )
+        st.plotly_chart(fig_mc, use_container_width=True)
+        st.caption(
+            "**Note:** *examples in definition* (419) — many are legitimate "
+            "(definition includes quoted phrases). Manual review needed."
+        )
+
+    st.markdown("---")
+
+    # Row 4: Stratum × field heatmap
+    st.subheader("Stratum × Field Agreement Heatmap")
+    heatmap_fields = [
+        "definition", "etymology", "examples", "part_of_speech",
+        "region_mentions", "cross_references",
+    ]
+    stratum_agg = aggregate["stratum_agreement"]
+    # Build matrix: rows = strata, cols = fields
+    # We use exact_agreement_pct from aggregate, broken down by stratum
+    # The stratum_agreement only has overall n/exact_agreement_pct/mean_token_similarity
+    # We need per-stratum per-field — compute from entries
+    # Build {stratum: {field: [values]}}
+    stratum_field_agree: dict = {s: {f: [] for f in heatmap_fields} for s in STRATA}
+    for e in entries:
+        comp = e["comparison"]
+        strata_flags = comp.get("strata", {})
+        ea_entry = comp.get("exact_agreement", {})
+        for s in STRATA:
+            if strata_flags.get(s, False):
+                for f in heatmap_fields:
+                    val = ea_entry.get(f)
+                    if val is not None:
+                        stratum_field_agree[s][f].append(1 if val else 0)
+
+    z_vals = []
+    z_text = []
+    for s in STRATA:
+        row = []
+        row_text = []
+        for f in heatmap_fields:
+            vals = stratum_field_agree[s][f]
+            pct = (sum(vals) / len(vals) * 100) if vals else 0
+            row.append(round(pct, 1))
+            row_text.append(f"{pct:.1f}%")
+        z_vals.append(row)
+        z_text.append(row_text)
+
+    fig_hm = go.Figure(go.Heatmap(
+        z=z_vals,
+        x=[f.replace("_", " ") for f in heatmap_fields],
+        y=[fmt_stratum(s) for s in STRATA],
+        colorscale=[[0, "#d62728"], [0.5, "#ffff00"], [1, "#2ca02c"]],
+        zmin=0, zmax=100,
+        text=z_text,
+        texttemplate="%{text}",
+        showscale=True,
+        colorbar=dict(title="Agreement %"),
+    ))
+    fig_hm.update_layout(
+        height=440,
+        margin=dict(l=10, r=10, t=20, b=20),
+        xaxis=dict(title="Field"),
+        yaxis=dict(title="Stratum"),
+    )
+    st.plotly_chart(fig_hm, use_container_width=True)
+
+    st.markdown("---")
+
+    # Classification disagreements
+    st.subheader("Classification Disagreements")
+    st.info(
+        f"**{len(classification_disagreements)} entries** were classified differently by the two systems. "
+        "The LLM is correct in all cases — these are 'See X.' pointer entries that the rule-based "
+        "parser incorrectly treated as full dictionary entries."
+    )
+    if classification_disagreements:
+        cd_rows = []
+        for cd in classification_disagreements:
+            cd_rows.append({
+                "para_id": cd["para_id"],
+                "headword": cd.get("headword", ""),
+                "full_text": (cd.get("full_text", "") or "")[:120],
+                "rb_type": cd.get("rb_type", ""),
+                "llm_type": cd.get("llm_type", ""),
+            })
+        st.dataframe(pd.DataFrame(cd_rows), use_container_width=True, hide_index=True)
 
 
-def apply_filters(df: pd.DataFrame) -> pd.DataFrame:
-    filtered = df.copy()
+# ─────────────────────────────────────────────────────────────────────────────
+# PAGE 2 — Entry Browser
+# ─────────────────────────────────────────────────────────────────────────────
 
-    st.sidebar.header("Filters")
+elif page == "2 · Entry Browser":
+    st.title("Entry Browser")
 
-    for field in FILTER_FIELDS:
-        if field not in filtered.columns:
+    # ── Sidebar filters ───────────────────────────────────────────────────────
+    st.sidebar.markdown("### Filters")
+
+    hw_list = [h["headword"] for h in hw_index if h["headword"]]
+
+    jump_hw = st.sidebar.text_input("Jump to headword", key="p2_jump")
+    search_hw = st.sidebar.text_input("Search headword contains", key="p2_search")
+
+    strata_choices = [fmt_stratum(s) for s in STRATA]
+    sel_strata = st.sidebar.multiselect("Strata", strata_choices, key="p2_strata")
+
+    flag_choices = [fmt_misclass(f) for f in MISCLASS_FLAGS]
+    sel_flags = st.sidebar.multiselect("Misclassification flags", flag_choices, key="p2_flags")
+
+    min_agree = st.sidebar.slider("Min agree %", 0, 100, 0, key="p2_min_agree")
+    max_agree = st.sidebar.slider("Max agree %", 0, 100, 100, key="p2_max_agree")
+    max_llm_cov = st.sidebar.slider("Max LLM coverage %", 0, 100, 100, key="p2_llm_cov")
+
+    sort_opt = st.sidebar.selectbox(
+        "Sort by",
+        [
+            "agree_pct ascending (worst first)",
+            "agree_pct descending (best first)",
+            "llm_coverage_pct ascending",
+            "para_id ascending",
+        ],
+        key="p2_sort",
+    )
+
+    # ── Filter entries ────────────────────────────────────────────────────────
+    sel_strata_raw = [STRATA[strata_choices.index(s)] for s in sel_strata]
+    sel_flags_raw  = [MISCLASS_FLAGS[flag_choices.index(f)] for f in sel_flags]
+
+    filtered = []
+    for e in entries:
+        comp = e["comparison"]
+        hw   = e["rb"].get("headword") or e["llm"].get("headword") or ""
+
+        if search_hw and search_hw.lower() not in hw.lower():
+            continue
+        ap = comp.get("agree_pct", 0) or 0
+        if not (min_agree <= ap <= max_agree):
+            continue
+        lc = comp.get("llm_coverage_pct", 100) or 100
+        if lc > max_llm_cov:
+            continue
+        if sel_strata_raw:
+            strata_flags = comp.get("strata", {})
+            if not all(strata_flags.get(s, False) for s in sel_strata_raw):
+                continue
+        if sel_flags_raw:
+            mf = comp.get("misclassification_flags", {})
+            if not all(mf.get(f, False) for f in sel_flags_raw):
+                continue
+        filtered.append(e)
+
+    # Sort
+    if sort_opt.startswith("agree_pct ascending"):
+        filtered.sort(key=lambda e: e["comparison"].get("agree_pct", 0) or 0)
+    elif sort_opt.startswith("agree_pct descending"):
+        filtered.sort(key=lambda e: e["comparison"].get("agree_pct", 0) or 0, reverse=True)
+    elif sort_opt.startswith("llm_coverage_pct"):
+        filtered.sort(key=lambda e: e["comparison"].get("llm_coverage_pct", 100) or 100)
+    else:
+        filtered.sort(key=lambda e: e["para_id"])
+
+    # Handle jump-to-headword
+    if jump_hw:
+        jump_hw_lower = jump_hw.lower()
+        match = next(
+            (h for h in hw_index if h["headword"].lower().startswith(jump_hw_lower)),
+            None,
+        )
+        if match:
+            st.session_state.selected_para_id = match["para_id"]
+
+    # ── Build results table ───────────────────────────────────────────────────
+    rows = []
+    for e in filtered:
+        comp = e["comparison"]
+        strata_active = [
+            fmt_stratum(s)
+            for s in STRATA
+            if comp.get("strata", {}).get(s, False)
+        ]
+        flags_active = [
+            fmt_misclass(f)
+            for f in MISCLASS_FLAGS
+            if comp.get("misclassification_flags", {}).get(f, False)
+        ]
+        rows.append({
+            "para_id":  e["para_id"],
+            "headword": e["rb"].get("headword") or e["llm"].get("headword") or "",
+            "agree_pct": round(comp.get("agree_pct", 0) or 0, 1),
+            "rb_cov":   round(comp.get("rb_coverage_pct", 0) or 0, 1),
+            "llm_cov":  round(comp.get("llm_coverage_pct", 0) or 0, 1),
+            "strata":   ", ".join(strata_active),
+            "flags":    ", ".join(flags_active),
+        })
+
+    df = pd.DataFrame(rows)
+    st.markdown(f"**{len(df)} entries** match the current filters.")
+
+    if df.empty:
+        st.warning("No entries match the current filters.")
+        st.stop()
+
+    sel_state = st.dataframe(
+        df,
+        use_container_width=True,
+        hide_index=True,
+        on_select="rerun",
+        selection_mode="single-row",
+    )
+
+    # Resolve selected entry
+    selected_entry = None
+    if sel_state.selection and sel_state.selection.get("rows"):
+        row_idx = sel_state.selection["rows"][0]
+        para_id = df.iloc[row_idx]["para_id"]
+        st.session_state.selected_para_id = para_id
+        selected_entry = entry_map.get(para_id)
+    elif st.session_state.selected_para_id:
+        selected_entry = entry_map.get(st.session_state.selected_para_id)
+
+    # ── Entry detail ──────────────────────────────────────────────────────────
+    if selected_entry:
+        e = selected_entry
+        rb   = e["rb"]
+        llm  = e["llm"]
+        comp = e["comparison"]
+        hw   = rb.get("headword") or llm.get("headword") or ""
+
+        st.markdown(f"### Entry: **{hw}** (para_id {e['para_id']})")
+        st.caption(
+            f"Agreement: {comp.get('agree_pct', 0):.1f}%  |  "
+            f"RB coverage: {comp.get('rb_coverage_pct', 0):.1f}%  |  "
+            f"LLM coverage: {comp.get('llm_coverage_pct', 0):.1f}%"
+        )
+
+        with st.expander("Source text", expanded=True):
+            st.markdown(
+                f'<div style="background:#f8f9fa;padding:12px;border-radius:6px;'
+                f'font-family:monospace;white-space:pre-wrap;">{e["full_text"]}</div>',
+                unsafe_allow_html=True,
+            )
+
+        ea_map  = comp.get("exact_agreement", {})
+        ts_map  = comp.get("token_similarity", {})
+
+        for field in CONTENT_FIELDS:
+            rb_val  = rb.get(field)
+            llm_val = llm.get(field)
+            if rb_val is None and llm_val is None:
+                continue
+
+            is_match = ea_map.get(field, False)
+            ts = ts_map.get(field, {})
+            ord_sim = ts.get("ordered", None)
+            unord_sim = ts.get("unordered", None)
+
+            col_name, col_rb, col_llm = st.columns([2, 4, 4])
+            with col_name:
+                st.markdown(f"**{field.replace('_', ' ')}**")
+                if ord_sim is not None:
+                    st.caption(f"seq: {ord_sim:.2f}  f1: {unord_sim:.2f}")
+            with col_rb:
+                bg = "#d4edda" if is_match else "#f8d7da"
+                st.markdown(
+                    f'<div style="background:{bg};padding:8px;border-radius:4px;">'
+                    f'<small><b>Rule-based</b></small><br>{display_value(rb_val)}</div>',
+                    unsafe_allow_html=True,
+                )
+            with col_llm:
+                bg = "#d4edda" if is_match else "#f8d7da"
+                st.markdown(
+                    f'<div style="background:{bg};padding:8px;border-radius:4px;">'
+                    f'<small><b>LLM</b></small><br>{display_value(llm_val)}</div>',
+                    unsafe_allow_html=True,
+                )
+
+        st.markdown("")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# PAGE 3 — Field Deep-Dive
+# ─────────────────────────────────────────────────────────────────────────────
+
+elif page == "3 · Field Deep-Dive":
+    st.title("Field Deep-Dive")
+
+    field = st.selectbox(
+        "Choose field",
+        CONTENT_FIELDS,
+        format_func=lambda f: f.replace("_", " "),
+        key="p3_field",
+    )
+
+    ea_pct = aggregate["exact_agreement_pct"].get(field, 0)
+    ts_agg = aggregate["token_similarity"].get(field, {})
+    fp     = aggregate["field_presence"].get(field, {})
+
+    # Metric cards
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Exact Agreement %", f"{ea_pct:.1f}%")
+    c2.metric("Mean Ordered Similarity", f"{ts_agg.get('ordered', 0):.3f}")
+    c3.metric("Mean Unordered Similarity", f"{ts_agg.get('unordered', 0):.3f}")
+
+    # Field presence
+    st.markdown("#### Field Presence")
+    p_cols = st.columns(5)
+    p_cols[0].metric("RB present %", f"{fp.get('rb_pct', 0):.1f}%")
+    p_cols[1].metric("LLM present %", f"{fp.get('llm_pct', 0):.1f}%")
+    p_cols[2].metric("Both present", fp.get("both", 0))
+    p_cols[3].metric("RB only", fp.get("rb_only", 0))
+    p_cols[4].metric("LLM only", fp.get("llm_only", 0))
+
+    st.markdown("---")
+    st.subheader(f"Disagreements on '{field.replace('_', ' ')}'")
+
+    # Build disagreements table
+    disagree_rows = []
+    for e in entries:
+        comp = e["comparison"]
+        ea   = comp.get("exact_agreement", {})
+        if ea.get(field, True):  # skip agreements
+            continue
+        ts   = comp.get("token_similarity", {}).get(field, {})
+        rb_v = display_value(e["rb"].get(field))
+        llm_v = display_value(e["llm"].get(field))
+        disagree_rows.append({
+            "para_id":     e["para_id"],
+            "headword":    e["rb"].get("headword") or e["llm"].get("headword") or "",
+            "rb_value":    rb_v[:100] if rb_v else "—",
+            "llm_value":   llm_v[:100] if llm_v else "—",
+            "ordered_sim": round(ts.get("ordered", 0) or 0, 3),
+            "unordered_sim": round(ts.get("unordered", 0) or 0, 3),
+            "_rb_full":    rb_v,
+            "_llm_full":   llm_v,
+            "_full_text":  e["full_text"],
+        })
+
+    disagree_rows.sort(key=lambda r: r["ordered_sim"])
+
+    df3 = pd.DataFrame(disagree_rows)
+    st.markdown(f"**{len(df3)} disagreements**")
+
+    display_cols = ["para_id", "headword", "rb_value", "llm_value", "ordered_sim", "unordered_sim"]
+    sel3 = st.dataframe(
+        df3[display_cols],
+        use_container_width=True,
+        hide_index=True,
+        on_select="rerun",
+        selection_mode="single-row",
+    )
+
+    # Download
+    csv3 = df3[display_cols].to_csv(index=False).encode("utf-8")
+    st.download_button(
+        "Download as CSV",
+        csv3,
+        file_name=f"disagreements_{field}.csv",
+        mime="text/csv",
+    )
+
+    # Row detail
+    if sel3.selection and sel3.selection.get("rows"):
+        idx3 = sel3.selection["rows"][0]
+        row3 = disagree_rows[idx3]
+        with st.expander("Full entry detail", expanded=True):
+            st.markdown(
+                f'<div style="background:#f8f9fa;padding:12px;border-radius:6px;'
+                f'font-family:monospace;white-space:pre-wrap;">{row3["_full_text"]}</div>',
+                unsafe_allow_html=True,
+            )
+            col_rb3, col_llm3 = st.columns(2)
+            with col_rb3:
+                st.markdown("**Rule-based value:**")
+                st.write(row3["_rb_full"])
+            with col_llm3:
+                st.markdown("**LLM value:**")
+                st.write(row3["_llm_full"])
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# PAGE 4 — Misclassification Inspector
+# ─────────────────────────────────────────────────────────────────────────────
+
+elif page == "4 · Misclassification Inspector":
+    st.title("Misclassification Inspector")
+
+    flag_display = {f: fmt_misclass(f) for f in MISCLASS_FLAGS}
+    sel_flag = st.selectbox(
+        "Misclassification type",
+        MISCLASS_FLAGS,
+        format_func=lambda f: flag_display[f],
+        key="p4_flag",
+    )
+
+    st.info(MISCLASS_DESCRIPTIONS[sel_flag])
+
+    mc_count = aggregate["misclassification_counts"].get(sel_flag, 0)
+    st.metric("Flagged entries", mc_count)
+
+    # Determine which field to show
+    field_map = {
+        "misclass_etym_in_definition":          ("definition", "etymology"),
+        "misclass_examples_in_definition":       ("definition", "examples"),
+        "misclass_chained_etym_collapsed":       ("etymology", "etymology"),
+        "misclass_examples_dropped":             ("examples", "examples"),
+        "misclass_numbered_senses_not_split":    ("definition", "definition"),
+        "misclass_cross_ref_missed":             ("cross_references", "cross_references"),
+    }
+    rb_field, llm_field = field_map.get(sel_flag, ("definition", "definition"))
+
+    flagged_rows = []
+    for e in entries:
+        comp = e["comparison"]
+        mf   = comp.get("misclassification_flags", {})
+        if not mf.get(sel_flag, False):
+            continue
+        rb_v  = display_value(e["rb"].get(rb_field))
+        llm_v = display_value(e["llm"].get(llm_field))
+        flagged_rows.append({
+            "para_id":   e["para_id"],
+            "headword":  e["rb"].get("headword") or e["llm"].get("headword") or "",
+            "full_text": (e["full_text"] or "")[:120],
+            f"rb_{rb_field}":  rb_v[:120] if rb_v else "—",
+            f"llm_{llm_field}": llm_v[:120] if llm_v else "—",
+            "_rb_full":  rb_v,
+            "_llm_full": llm_v,
+            "_full_text": e["full_text"],
+        })
+
+    display_cols4 = ["para_id", "headword", "full_text", f"rb_{rb_field}", f"llm_{llm_field}"]
+    df4 = pd.DataFrame(flagged_rows)
+    if df4.empty:
+        st.warning("No entries flagged for this type.")
+    else:
+        sel4 = st.dataframe(
+            df4[display_cols4],
+            use_container_width=True,
+            hide_index=True,
+            on_select="rerun",
+            selection_mode="single-row",
+        )
+
+        csv4 = df4[display_cols4].to_csv(index=False).encode("utf-8")
+        st.download_button(
+            "Download as CSV",
+            csv4,
+            file_name=f"misclass_{sel_flag}.csv",
+            mime="text/csv",
+        )
+
+        if sel4.selection and sel4.selection.get("rows"):
+            idx4 = sel4.selection["rows"][0]
+            row4 = flagged_rows[idx4]
+            with st.expander("Full entry detail", expanded=True):
+                st.markdown(
+                    f'<div style="background:#f8f9fa;padding:12px;border-radius:6px;'
+                    f'font-family:monospace;white-space:pre-wrap;">{row4["_full_text"]}</div>',
+                    unsafe_allow_html=True,
+                )
+                col_rb4, col_llm4 = st.columns(2)
+                with col_rb4:
+                    st.markdown(f"**Rule-based `{rb_field}`:**")
+                    st.write(row4["_rb_full"])
+                with col_llm4:
+                    st.markdown(f"**LLM `{llm_field}`:**")
+                    st.write(row4["_llm_full"])
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# PAGE 5 — Source Annotation
+# ─────────────────────────────────────────────────────────────────────────────
+
+elif page == "5 · Source Annotation":
+    st.title("Source Annotation")
+
+    st.sidebar.markdown("### Source Annotation Filters")
+
+    hw_list5 = [h["headword"] for h in hw_index if h["headword"]]
+    jump_hw5 = st.sidebar.text_input("Jump to headword", key="p5_jump")
+
+    sort_opt5 = st.sidebar.selectbox(
+        "Sort / filter by",
+        [
+            "Worst LLM coverage (ascending)",
+            "Biggest RB-LLM coverage gap (descending)",
+            "Most uncovered tokens (descending)",
+            "Worst agree_pct (ascending)",
+            "para_id (ascending)",
+        ],
+        key="p5_sort",
+    )
+
+    max_llm_cov5 = st.sidebar.slider("Max LLM coverage %", 0, 100, 100, key="p5_cov")
+    min_miss5    = st.sidebar.slider("Min uncovered token count", 0, 50, 0, key="p5_miss")
+
+    # Build annotated list (we need miss counts, so annotate all first lazily)
+    # We'll filter based on coverage slider and annotate on demand for selected entry
+    # Pre-filter by coverage
+    prefiltered5 = [
+        e for e in entries
+        if (e["comparison"].get("llm_coverage_pct") or 100) <= max_llm_cov5
+    ]
+
+    # For miss count filter we need to annotate — do it only if min_miss5 > 0
+    if min_miss5 > 0:
+        filtered5 = []
+        for e in prefiltered5:
+            ann = annotate_tokens(e["full_text"], e["rb"], e["llm"])
+            miss_count = sum(1 for a in ann if a["colour"] == "miss")
+            if miss_count >= min_miss5:
+                filtered5.append(e)
+    else:
+        filtered5 = prefiltered5
+
+    # Sort
+    if sort_opt5.startswith("Worst LLM"):
+        filtered5 = sorted(filtered5, key=lambda e: e["comparison"].get("llm_coverage_pct") or 100)
+    elif sort_opt5.startswith("Biggest RB-LLM"):
+        filtered5 = sorted(
+            filtered5,
+            key=lambda e: (e["comparison"].get("rb_coverage_pct") or 0) - (e["comparison"].get("llm_coverage_pct") or 0),
+            reverse=True,
+        )
+    elif sort_opt5.startswith("Most uncovered"):
+        annotated_cache = {}
+        for e in filtered5:
+            ann = annotate_tokens(e["full_text"], e["rb"], e["llm"])
+            annotated_cache[e["para_id"]] = ann
+        filtered5 = sorted(
+            filtered5,
+            key=lambda e: sum(1 for a in annotated_cache.get(e["para_id"], []) if a["colour"] == "miss"),
+            reverse=True,
+        )
+    elif sort_opt5.startswith("Worst agree"):
+        filtered5 = sorted(filtered5, key=lambda e: e["comparison"].get("agree_pct") or 0)
+    else:
+        filtered5 = sorted(filtered5, key=lambda e: e["para_id"])
+
+    total5 = len(filtered5)
+    if total5 == 0:
+        st.warning("No entries match the current filters.")
+        st.stop()
+
+    # Handle jump-to
+    if jump_hw5:
+        jump_lower5 = jump_hw5.lower()
+        match5 = next(
+            (h for h in hw_index if h["headword"].lower().startswith(jump_lower5)),
+            None,
+        )
+        if match5:
+            pid = match5["para_id"]
+            for i, e in enumerate(filtered5):
+                if e["para_id"] == pid:
+                    st.session_state.p5_index = i
+                    break
+
+    # Clamp index
+    idx5 = max(0, min(st.session_state.p5_index, total5 - 1))
+
+    # Previous / Next
+    nav_cols = st.columns([1, 1, 6])
+    with nav_cols[0]:
+        if st.button("← Previous") and idx5 > 0:
+            st.session_state.p5_index = idx5 - 1
+            st.rerun()
+    with nav_cols[1]:
+        if st.button("Next →") and idx5 < total5 - 1:
+            st.session_state.p5_index = idx5 + 1
+            st.rerun()
+
+    idx5 = max(0, min(st.session_state.p5_index, total5 - 1))
+    entry5 = filtered5[idx5]
+    st.session_state.selected_para_id = entry5["para_id"]
+
+    rb5   = entry5["rb"]
+    llm5  = entry5["llm"]
+    comp5 = entry5["comparison"]
+    hw5   = rb5.get("headword") or llm5.get("headword") or ""
+
+    st.markdown(f"**Entry {idx5 + 1} of {total5}** — para_id {entry5['para_id']}")
+    st.markdown(f"## {hw5}")
+
+    # Build per-system token sets for field rendering
+    rb_all_tokens: set = set()
+    llm_all_tokens: set = set()
+    for f in CONTENT_FIELDS:
+        rb_all_tokens  |= get_tokens(rb5.get(f))
+        llm_all_tokens |= get_tokens(llm5.get(f))
+
+    # Annotate source text
+    ann5 = annotate_tokens(entry5["full_text"], rb5, llm5)
+
+    # Section 1: Source text
+    st.markdown("### Source Text")
+    st.markdown(LEGEND_HTML, unsafe_allow_html=True)
+    st.markdown(render_tokens_html(ann5), unsafe_allow_html=True)
+
+    # Section 2: Field breakdown
+    st.markdown("### Field Breakdown")
+
+    for field in CONTENT_FIELDS:
+        rb_val5  = rb5.get(field)
+        llm_val5 = llm5.get(field)
+        if rb_val5 is None and llm_val5 is None:
             continue
 
-        values = filtered[field].dropna().astype(str).unique().tolist()
-        values = sorted(values)
-        selected = st.sidebar.multiselect(
-            field,
-            options=values,
-            default=[],
-            key=f"filter_{field}",
-        )
-        if selected:
-            filtered = filtered[filtered[field].astype(str).isin(selected)]
+        st.markdown(f"**{field.replace('_', ' ')}**")
+        is_match5 = comp5.get("exact_agreement", {}).get(field, False)
+        ts5 = comp5.get("token_similarity", {}).get(field, {})
 
-    only_false_matches = st.sidebar.checkbox(
-        "Show only rows where any match flag is false",
-        value=False,
-        help="Checks source_text_match, pos_match_norm, and region_mentions_match_norm.",
-    )
-    if only_false_matches:
-        existing = [c for c in MATCH_FIELDS if c in filtered.columns]
-        if existing:
-            mask = pd.Series(False, index=filtered.index)
-            for col in existing:
-                mask = mask | filtered[col].apply(is_false_like)
-            filtered = filtered[mask]
-
-    search_text = st.session_state.get("search_text_input", "").strip()
-    filtered = filtered[search_mask(filtered, search_text)]
-
-    return filtered
-
-
-# =========================================================
-# Navigation
-# =========================================================
-def clamp_current_pos(total_rows: int) -> None:
-    if total_rows <= 0:
-        st.session_state.current_pos = 0
-        return
-    st.session_state.current_pos = max(0, min(st.session_state.current_pos, total_rows - 1))
-
-
-def jump_to_entry_id(filtered_df: pd.DataFrame, entry_id_value: str) -> Optional[int]:
-    if "entry_id" not in filtered_df.columns:
-        return None
-    if not entry_id_value.strip():
-        return None
-
-    matches = filtered_df.index[
-        filtered_df["entry_id"].astype(str).str.strip() == entry_id_value.strip()
-    ].tolist()
-
-    if not matches:
-        return None
-
-    target_index = matches[0]
-    return list(filtered_df.index).index(target_index)
-
-
-# =========================================================
-# Highlighting
-# =========================================================
-def tokenize_for_alignment(text: str) -> List[str]:
-    return re.findall(r"\w+|\W+", text, flags=re.UNICODE)
-
-
-def normalize_token(token: str) -> str:
-    return token.lower()
-
-
-def build_hallucination_highlight_html(source_text: Any, target_text: Any) -> str:
-    if value_is_missing(target_text):
-        return "∅"
-
-    source_text = "" if value_is_missing(source_text) else str(source_text)
-    target_text = str(target_text)
-
-    src_tokens = tokenize_for_alignment(source_text)
-    tgt_tokens = tokenize_for_alignment(target_text)
-
-    src_norm = [normalize_token(t) for t in src_tokens]
-    tgt_norm = [normalize_token(t) for t in tgt_tokens]
-
-    matcher = SequenceMatcher(a=src_norm, b=tgt_norm, autojunk=False)
-
-    matched_target_positions = set()
-    for block in matcher.get_matching_blocks():
-        for idx in range(block.b, block.b + block.size):
-            matched_target_positions.add(idx)
-
-    rendered = []
-    for i, token in enumerate(tgt_tokens):
-        escaped = html.escape(token)
-        if i in matched_target_positions:
-            rendered.append(escaped)
-        else:
-            if re.search(r"\w", token, flags=re.UNICODE):
-                rendered.append(
-                    "<span style='background:#fee2e2;color:#991b1b;"
-                    "padding:0 2px;border-radius:3px;'>"
-                    f"{escaped}</span>"
-                )
-            else:
-                rendered.append(escaped)
-
-    return "".join(rendered)
-
-
-def render_json_like_html(value: Any, source_text: Any, highlight_non_source: bool) -> str:
-    if value_is_missing(value):
-        return "∅"
-
-    def render(v: Any, indent: int = 0) -> str:
-        spacer = "&nbsp;" * 2 * indent
-
-        if value_is_missing(v):
-            return "null"
-
-        if isinstance(v, str):
-            escaped = (
-                build_hallucination_highlight_html(source_text, v)
-                if highlight_non_source
-                else html.escape(v)
+        f_col_rb, f_col_llm = st.columns(2)
+        with f_col_rb:
+            st.markdown("<small><b>Rule-based</b></small>", unsafe_allow_html=True)
+            st.markdown(
+                render_field_tokens_html(rb_val5, rb_all_tokens, llm_all_tokens),
+                unsafe_allow_html=True,
             )
-            return f'"{escaped}"'
+        with f_col_llm:
+            st.markdown("<small><b>LLM</b></small>", unsafe_allow_html=True)
+            st.markdown(
+                render_field_tokens_html(llm_val5, rb_all_tokens, llm_all_tokens),
+                unsafe_allow_html=True,
+            )
 
-        if isinstance(v, bool):
-            return "true" if v else "false"
-
-        if isinstance(v, (int, float)) and not isinstance(v, bool):
-            return html.escape(str(v))
-
-        if isinstance(v, list):
-            if not v:
-                return "[]"
-            parts = ["["]
-            for item in v:
-                parts.append(f"{spacer}&nbsp;&nbsp;{render(item, indent + 1)}")
-            parts.append(f"{spacer}]")
-            return "<br>".join(parts)
-
-        if isinstance(v, dict):
-            if not v:
-                return "{}"
-            parts = ["{"]
-            for k, item in v.items():
-                key_html = html.escape(str(k))
-                val_html = render(item, indent + 1)
-                parts.append(f"{spacer}&nbsp;&nbsp;\"{key_html}\": {val_html}")
-            parts.append(f"{spacer}}}")
-            return "<br>".join(parts)
-
-        return html.escape(str(v))
-
-    return render(value)
-
-
-def render_cell_html(value: Any, source_text: Any, highlight_non_source: bool) -> str:
-    if value_is_missing(value):
-        return "∅"
-
-    if isinstance(value, str):
-        stripped = value.strip()
-        if stripped and (
-            (stripped.startswith("{") and stripped.endswith("}"))
-            or (stripped.startswith("[") and stripped.endswith("]"))
-        ):
-            try:
-                parsed = json.loads(stripped)
-                return render_json_like_html(parsed, source_text, highlight_non_source)
-            except Exception:
-                pass
-
-    if isinstance(value, (dict, list)):
-        return render_json_like_html(value, source_text, highlight_non_source)
-
-    if isinstance(value, str):
-        if highlight_non_source:
-            return build_hallucination_highlight_html(source_text, value)
-        return html.escape(value)
-
-    return html.escape(pretty_value(value))
-
-
-# =========================================================
-# Render helpers
-# =========================================================
-def render_header(row: pd.Series, filtered_position: int, filtered_total: int, raw_index: Any) -> None:
-    st.subheader("Row Summary")
-    st.markdown(
-        f"""
-        **Filtered position:** {filtered_position + 1} / {filtered_total}  
-        **Original row index:** {raw_index}
-        """
-    )
-
-    c1, c2, c3 = st.columns(3)
-
-    with c1:
-        st.markdown(f"**entry_id**: `{row.get('entry_id', 'N/A')}`")
-        st.markdown(f"**_merge**: {status_badge(row.get('_merge'))}", unsafe_allow_html=True)
-
-    with c2:
-        st.markdown(f"**source_text_match**: {status_badge(row.get('source_text_match'))}", unsafe_allow_html=True)
-        st.markdown(f"**pos_match_norm**: {status_badge(row.get('pos_match_norm'))}", unsafe_allow_html=True)
-
-    with c3:
+        match_badge = (
+            '<span style="background:#d4edda;color:#155724;padding:2px 8px;'
+            'border-radius:3px;">✓ match</span>'
+            if is_match5 else
+            '<span style="background:#f8d7da;color:#721c24;padding:2px 8px;'
+            'border-radius:3px;">✗ differ</span>'
+        )
+        ord5  = ts5.get("ordered", None)
+        unord5 = ts5.get("unordered", None)
+        sim_str = f"  seq: {ord5:.2f}  f1: {unord5:.2f}" if ord5 is not None else ""
         st.markdown(
-            f"**region_mentions_match_norm**: {status_badge(row.get('region_mentions_match_norm'))}",
+            match_badge + f'<span style="color:#666;font-size:0.85em;">&nbsp;&nbsp;{sim_str}</span>',
             unsafe_allow_html=True,
         )
+        st.markdown("")
+
+    # Coverage summary
+    st.markdown("---")
+    st.markdown("### Coverage Summary")
+    rb_cov5  = comp5.get("rb_coverage_pct", 0) or 0
+    llm_cov5 = comp5.get("llm_coverage_pct", 0) or 0
+    gap5     = rb_cov5 - llm_cov5
+
+    cov_c1, cov_c2, cov_c3 = st.columns(3)
+    cov_c1.metric("RB coverage", f"{rb_cov5:.1f}%")
+    cov_c2.metric("LLM coverage", f"{llm_cov5:.1f}%")
+    cov_c3.metric("Gap (RB − LLM)", f"{gap5:.1f}%")
+
+    miss_tokens = [a["token"] for a in ann5 if a["colour"] == "miss"]
+    if miss_tokens:
         st.markdown(
-            f"**rule_possible_hallucination**: {status_badge(row.get('rule_possible_hallucination'))}",
+            f'**Uncovered tokens ({len(miss_tokens)}):** '
+            + " ".join(
+                f'<span style="background:#f8d7da;color:#721c24;padding:1px 4px;'
+                f'border-radius:3px;">{t}</span>'
+                for t in miss_tokens
+            ),
             unsafe_allow_html=True,
         )
-        st.markdown(
-            f"**genai_possible_hallucination**: {status_badge(row.get('genai_possible_hallucination'))}",
-            unsafe_allow_html=True,
-        )
-
-
-def render_source_text(row: pd.Series) -> None:
-    st.subheader("Source Text")
-
-    rule_text = row.get("source_text_rule")
-    genai_text = row.get("source_text_genai")
-
-    if value_equal(rule_text, genai_text):
-        st.caption("One source text shown. source_text_rule and source_text_genai match.")
-        st.code(pretty_value(rule_text), language=None)
     else:
-        st.warning("source_text_rule and source_text_genai differ.")
-        left, right = st.columns(2)
-        with left:
-            st.markdown("**source_text_rule**")
-            st.code(pretty_value(rule_text), language=None)
-        with right:
-            st.markdown("**source_text_genai**")
-            st.code(pretty_value(genai_text), language=None)
-
-
-def render_comparison_table(row: pd.Series) -> None:
-    st.subheader("Comparison Table")
-
-    source_text = row.get("source_text_rule")
-    if value_is_missing(source_text):
-        source_text = row.get("source_text_genai")
-
-    rows_html = ""
-
-    for field_label, rule_col, genai_col in COMPARISON_ROWS:
-        rule_val = row.get(rule_col)
-        genai_val = row.get(genai_col)
-
-        row_diff = not value_equal(rule_val, genai_val)
-
-        rule_html = render_cell_html(rule_val, source_text, highlight_non_source=False)
-        genai_html = render_cell_html(
-            genai_val,
-            source_text,
-            highlight_non_source=(genai_col in GENAI_HIGHLIGHT_FIELDS),
-        )
-
-        bg = "#fef2f2" if row_diff else "white"
-
-        rows_html += f"""
-        <tr>
-            <td style="font-weight:600; background:#fafafa; width:15%; border:1px solid #ddd; padding:8px; vertical-align:top;">
-                {html.escape(field_label)}
-            </td>
-            <td style="background:{bg}; padding:8px; vertical-align:top; border:1px solid #ddd;">
-                <div style="white-space:pre-wrap; max-height:250px; overflow:auto; font-family:monospace; font-size:0.85rem; line-height:1.45;">
-                    {rule_html}
-                </div>
-            </td>
-            <td style="background:{bg}; padding:8px; vertical-align:top; border:1px solid #ddd;">
-                <div style="white-space:pre-wrap; max-height:250px; overflow:auto; font-family:monospace; font-size:0.85rem; line-height:1.45;">
-                    {genai_html}
-                </div>
-            </td>
-        </tr>
-        """
-
-    full_html = f"""
-    <!DOCTYPE html>
-    <html>
-    <body style="font-family: Arial, sans-serif; margin: 0; padding: 0;">
-        <div style="font-size:0.9rem; color:#666; margin-bottom:10px;">
-            Red text in the GenAI column = text not grounded in source.
-        </div>
-
-        <table style="width:100%; border-collapse:collapse; table-layout:fixed;">
-            <thead>
-                <tr style="background:#f3f4f6;">
-                    <th style="text-align:left; padding:8px; border:1px solid #ddd; width:15%;">Field</th>
-                    <th style="text-align:left; padding:8px; border:1px solid #ddd; width:42.5%;">Rule-based</th>
-                    <th style="text-align:left; padding:8px; border:1px solid #ddd; width:42.5%;">GenAI</th>
-                </tr>
-            </thead>
-            <tbody>
-                {rows_html}
-            </tbody>
-        </table>
-    </body>
-    </html>
-    """
-
-    components.html(full_html, height=1200, scrolling=True)
-
-
-def render_diagnostics(row: pd.Series) -> None:
-    st.subheader("Row-Level Diagnostics")
-
-    diag_cols = st.columns(len(DIAGNOSTIC_FIELDS))
-    for col, field in zip(diag_cols, DIAGNOSTIC_FIELDS):
-        with col:
-            st.caption(field)
-            value = row.get(field, "N/A")
-            st.code(pretty_value(value), language=None)
-
-    st.markdown("#### Presence Flags")
-    existing_presence_fields = [f for f in PRESENCE_STATUS_FIELDS if f in row.index]
-    if existing_presence_fields:
-        cols = st.columns(len(existing_presence_fields))
-        for col, field in zip(cols, existing_presence_fields):
-            with col:
-                st.caption(field)
-                st.markdown(status_badge(row.get(field)), unsafe_allow_html=True)
-    else:
-        st.info("No presence status fields available in this row.")
-
-
-# =========================================================
-# Main app
-# =========================================================
-def main() -> None:
-    init_state()
-
-    st.title("Parser Output Qualitative Review")
-    st.caption("Local Streamlit app for auditing rule-based vs GenAI parser output from a JSONL file.")
-
-    file_path = st.text_input(
-        "JSONL path",
-        value=str(DEFAULT_JSONL_PATH),
-        help="Local path or repo-relative path to the merged JSONL used for auditing.",
-    )
-
-    try:
-        df = load_jsonl(file_path)
-    except Exception as e:
-        st.error(str(e))
-        st.stop()
-
-    df = df.reset_index(drop=False).rename(columns={"index": "__original_index__"})
-
-    st.subheader("Navigation & Search")
-
-    top1, top2, top3, top4 = st.columns([1.1, 1.1, 2, 3])
-
-    with top1:
-        prev_top = st.button("⬅ Previous", use_container_width=True)
-
-    with top2:
-        next_top = st.button("Next ➡", use_container_width=True)
-
-    with top3:
-        st.text_input(
-            "Jump by entry_id",
-            key="jump_entry_id_input",
-            placeholder="Enter exact entry_id",
-        )
-
-    with top4:
-        st.text_input(
-            "Search text",
-            key="search_text_input",
-            placeholder="Search source_text_rule / source_text_genai / headword_rule / headword_genai",
-        )
-
-    filtered = apply_filters(df)
-    filtered_total = len(filtered)
-
-    st.markdown(f"**Rows after filtering:** {filtered_total} / {len(df)}")
-
-    if filtered_total == 0:
-        st.warning("No rows match the current filters/search.")
-        st.stop()
-
-    jump_value = st.session_state.get("jump_entry_id_input", "").strip()
-    if jump_value:
-        target_pos = jump_to_entry_id(filtered, jump_value)
-        if target_pos is not None:
-            st.session_state.current_pos = target_pos
-
-    clamp_current_pos(filtered_total)
-
-    if prev_top:
-        st.session_state.current_pos = max(0, st.session_state.current_pos - 1)
-    if next_top:
-        st.session_state.current_pos = min(filtered_total - 1, st.session_state.current_pos + 1)
-
-    nav_a, nav_b = st.columns([1, 1])
-    with nav_a:
-        prev_bottom = st.button("Previous row")
-    with nav_b:
-        next_bottom = st.button("Next row")
-
-    if prev_bottom:
-        st.session_state.current_pos = max(0, st.session_state.current_pos - 1)
-    if next_bottom:
-        st.session_state.current_pos = min(filtered_total - 1, st.session_state.current_pos + 1)
-
-    clamp_current_pos(filtered_total)
-
-    selected_pos = st.number_input(
-        "Row selector within filtered subset",
-        min_value=0,
-        max_value=max(filtered_total - 1, 0),
-        value=int(st.session_state.current_pos),
-        step=1,
-        help="This index is relative to the filtered subset.",
-    )
-
-    if int(selected_pos) != int(st.session_state.current_pos):
-        st.session_state.current_pos = int(selected_pos)
-
-    clamp_current_pos(filtered_total)
-
-    selected_row = filtered.iloc[st.session_state.current_pos]
-    raw_index = selected_row["__original_index__"]
-
-    render_header(
-        row=selected_row,
-        filtered_position=st.session_state.current_pos,
-        filtered_total=filtered_total,
-        raw_index=raw_index,
-    )
-
-    st.divider()
-    render_source_text(selected_row)
-
-    st.divider()
-    render_comparison_table(selected_row)
-
-    st.divider()
-    render_diagnostics(selected_row)
-
-
-if __name__ == "__main__":
-    main()
+        st.success("No uncovered tokens — all source tokens appear in at least one system's output.")
