@@ -204,6 +204,19 @@ aggregate = data["aggregate"]
 entries = data["entries"]
 classification_disagreements = data.get("classification_disagreements", [])
 
+EMBED_PATH = os.path.join(os.path.dirname(__file__), "data", "embeddings.json")
+
+
+@st.cache_data
+def load_embeddings():
+    if not os.path.exists(EMBED_PATH):
+        return None
+    with open(EMBED_PATH, encoding="utf-8") as f:
+        return json.load(f)
+
+
+embed_data = load_embeddings()
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Token annotation (Page 5)
@@ -304,30 +317,87 @@ if "selected_para_id" not in st.session_state:
     st.session_state.selected_para_id = None
 if "p5_index" not in st.session_state:
     st.session_state.p5_index = 0
+if "current_page" not in st.session_state:
+    st.session_state.current_page = "semantic"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Sidebar navigation
 # ─────────────────────────────────────────────────────────────────────────────
 
-st.sidebar.title("Hiberno-English\nLexical Extraction")
-st.sidebar.markdown("---")
+st.sidebar.markdown("""
+<div style="padding:0 0 16px 0;">
+  <div style="font-size:1.1rem;font-weight:700;color:#1a1a2e;
+              letter-spacing:-0.3px;line-height:1.2;">
+    Hiberno-English
+  </div>
+  <div style="font-size:0.75rem;color:#666;margin-top:2px;
+              letter-spacing:0.3px;text-transform:uppercase;">
+    Lexical Extraction
+  </div>
+</div>
+""", unsafe_allow_html=True)
 
-page = st.sidebar.radio(
-    "Navigate",
-    [
-        "1 · Overview",
-        "2 · Entry Browser",
-        "3 · Field Deep-Dive",
-        "4 · Misclassification Inspector",
-        "5 · Source Annotation",
-    ],
-)
+NAV_PAGES = [
+    ("semantic",   "Semantic Space",      "◉"),
+    ("overview",   "Overview",            "○"),
+    ("browser",    "Entry Browser",       "≡"),
+    ("deepdive",   "Field Deep-Dive",     "⊞"),
+    ("misclass",   "Misclassification",   "⚑"),
+    ("annotation", "Source Annotation",   "◈"),
+]
+
+# Inject CSS to style the nav buttons
+st.sidebar.markdown("""
+<style>
+/* Nav button base */
+div[data-testid="stSidebar"] div.stButton > button {
+    width: 100%;
+    text-align: left;
+    padding: 7px 12px;
+    margin: 1px 0;
+    border-radius: 6px;
+    border: 1px solid transparent;
+    background: transparent;
+    color: #444;
+    font-size: 0.875rem;
+    font-weight: 400;
+    line-height: 1.4;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s;
+}
+div[data-testid="stSidebar"] div.stButton > button:hover {
+    background: #f0f0f5;
+    color: #1a1a2e;
+    border-color: #e0e0e8;
+}
+</style>
+""", unsafe_allow_html=True)
+
+for key, label, icon in NAV_PAGES:
+    is_active = st.session_state.current_page == key
+    if is_active:
+        # Active item rendered as styled HTML (not a button)
+        st.sidebar.markdown(
+            f'<div style="background:#1a1a2e;color:#fff;padding:7px 12px;'
+            f'border-radius:6px;font-size:0.875rem;font-weight:600;'
+            f'margin:1px 0;cursor:default;">'
+            f'{icon}&nbsp;&nbsp;{label}</div>',
+            unsafe_allow_html=True,
+        )
+    else:
+        if st.sidebar.button(f"{icon}  {label}", key=f"nav_{key}", use_container_width=True):
+            st.session_state.current_page = key
+            st.rerun()
+
+st.sidebar.markdown("<hr style='margin:12px 0;border-color:#e8e8e8;'>", unsafe_allow_html=True)
+
+page = st.session_state.current_page
 
 # ─────────────────────────────────────────────────────────────────────────────
 # PAGE 1 — Overview
 # ─────────────────────────────────────────────────────────────────────────────
 
-if page == "1 · Overview":
+if page == "overview":
     st.title("Overview")
 
     ea = aggregate["exact_agreement_pct"]
@@ -518,7 +588,7 @@ if page == "1 · Overview":
 # PAGE 2 — Entry Browser
 # ─────────────────────────────────────────────────────────────────────────────
 
-elif page == "2 · Entry Browser":
+elif page == "browser":
     st.title("Entry Browser")
 
     # ── Sidebar filters ───────────────────────────────────────────────────────
@@ -709,7 +779,7 @@ elif page == "2 · Entry Browser":
 # PAGE 3 — Field Deep-Dive
 # ─────────────────────────────────────────────────────────────────────────────
 
-elif page == "3 · Field Deep-Dive":
+elif page == "deepdive":
     st.title("Field Deep-Dive")
 
     field = st.selectbox(
@@ -809,7 +879,7 @@ elif page == "3 · Field Deep-Dive":
 # PAGE 4 — Misclassification Inspector
 # ─────────────────────────────────────────────────────────────────────────────
 
-elif page == "4 · Misclassification Inspector":
+elif page == "misclass":
     st.title("Misclassification Inspector")
 
     flag_display = {f: fmt_misclass(f) for f in MISCLASS_FLAGS}
@@ -898,12 +968,10 @@ elif page == "4 · Misclassification Inspector":
 # PAGE 5 — Source Annotation
 # ─────────────────────────────────────────────────────────────────────────────
 
-elif page == "5 · Source Annotation":
-    st.title("Source Annotation")
+elif page == "annotation":
 
     st.sidebar.markdown("### Source Annotation Filters")
 
-    hw_list5 = [h["headword"] for h in hw_index if h["headword"]]
     jump_hw5 = st.sidebar.text_input("Jump to headword", key="p5_jump")
 
     sort_opt5 = st.sidebar.selectbox(
@@ -921,8 +989,6 @@ elif page == "5 · Source Annotation":
     max_llm_cov5 = st.sidebar.slider("Max LLM coverage %", 0, 100, 100, key="p5_cov")
     min_miss5    = st.sidebar.slider("Min uncovered token count", 0, 50, 0, key="p5_miss")
 
-    # Build annotated list (we need miss counts, so annotate all first lazily)
-    # We'll filter based on coverage slider and annotate on demand for selected entry
     # Pre-filter by coverage
     prefiltered5 = [
         e for e in entries
@@ -986,14 +1052,14 @@ elif page == "5 · Source Annotation":
     # Clamp index
     idx5 = max(0, min(st.session_state.p5_index, total5 - 1))
 
-    # Previous / Next
-    nav_cols = st.columns([1, 1, 6])
-    with nav_cols[0]:
-        if st.button("← Previous") and idx5 > 0:
+    # ── Navigation buttons ────────────────────────────────────────────────────
+    nav_c1, nav_c2, nav_c3 = st.columns([1, 1, 8])
+    with nav_c1:
+        if st.button("← Prev", key="p5_prev") and idx5 > 0:
             st.session_state.p5_index = idx5 - 1
             st.rerun()
-    with nav_cols[1]:
-        if st.button("Next →") and idx5 < total5 - 1:
+    with nav_c2:
+        if st.button("Next →", key="p5_next") and idx5 < total5 - 1:
             st.session_state.p5_index = idx5 + 1
             st.rerun()
 
@@ -1006,8 +1072,22 @@ elif page == "5 · Source Annotation":
     comp5 = entry5["comparison"]
     hw5   = rb5.get("headword") or llm5.get("headword") or ""
 
-    st.markdown(f"**Entry {idx5 + 1} of {total5}** — para_id {entry5['para_id']}")
-    st.markdown(f"## {hw5}")
+    # ── Header card ───────────────────────────────────────────────────────────
+    st.markdown(f"""
+<div style="background:#1a1a2e;color:white;padding:12px 20px;
+            border-radius:8px;margin-bottom:16px;
+            display:flex;align-items:center;justify-content:space-between;">
+  <div>
+    <span style="font-size:1.4rem;font-weight:700;">{hw5}</span>
+    <span style="font-size:0.8rem;opacity:0.6;margin-left:12px;">
+      para_id {entry5['para_id']}
+    </span>
+  </div>
+  <div style="font-size:0.8rem;opacity:0.7;">
+    Entry {idx5 + 1} of {total5}
+  </div>
+</div>
+""", unsafe_allow_html=True)
 
     # Build per-system token sets for field rendering
     rb_all_tokens: set = set()
@@ -1019,76 +1099,478 @@ elif page == "5 · Source Annotation":
     # Annotate source text
     ann5 = annotate_tokens(entry5["full_text"], rb5, llm5)
 
-    # Section 1: Source text
-    st.markdown("### Source Text")
-    st.markdown(LEGEND_HTML, unsafe_allow_html=True)
-    st.markdown(render_tokens_html(ann5), unsafe_allow_html=True)
+    # ── Source text card ──────────────────────────────────────────────────────
+    source_html = render_tokens_html(ann5)
+    st.markdown(f"""
+<div style="background:#f8f9fa;border:1px solid #e0e0e0;
+            border-radius:8px;padding:16px 20px;margin-bottom:16px;">
+  <div style="font-size:0.7rem;font-weight:600;letter-spacing:0.08em;
+              text-transform:uppercase;color:#888;margin-bottom:10px;">
+    SOURCE TEXT
+  </div>
+  {LEGEND_HTML}
+  <div style="margin-top:10px;">
+    {source_html}
+  </div>
+</div>
+""", unsafe_allow_html=True)
 
-    # Section 2: Field breakdown
-    st.markdown("### Field Breakdown")
+    # ── Field breakdown — single HTML table ───────────────────────────────────
+    st.markdown("""
+<div style="font-size:0.7rem;font-weight:600;letter-spacing:0.08em;
+            text-transform:uppercase;color:#888;margin:20px 0 10px;">
+  FIELD BREAKDOWN
+</div>
+""", unsafe_allow_html=True)
 
+    rows_html = ""
     for field in CONTENT_FIELDS:
         rb_val5  = rb5.get(field)
         llm_val5 = llm5.get(field)
         if rb_val5 is None and llm_val5 is None:
             continue
 
-        st.markdown(f"**{field.replace('_', ' ')}**")
         is_match5 = comp5.get("exact_agreement", {}).get(field, False)
-        ts5 = comp5.get("token_similarity", {}).get(field, {})
+        ts5       = comp5.get("token_similarity", {}).get(field, {})
+        ord5      = ts5.get("ordered", 0) or 0
+        unord5    = ts5.get("unordered", 0) or 0
 
-        f_col_rb, f_col_llm = st.columns(2)
-        with f_col_rb:
-            st.markdown("<small><b>Rule-based</b></small>", unsafe_allow_html=True)
-            st.markdown(
-                render_field_tokens_html(rb_val5, rb_all_tokens, llm_all_tokens),
-                unsafe_allow_html=True,
-            )
-        with f_col_llm:
-            st.markdown("<small><b>LLM</b></small>", unsafe_allow_html=True)
-            st.markdown(
-                render_field_tokens_html(llm_val5, rb_all_tokens, llm_all_tokens),
-                unsafe_allow_html=True,
-            )
+        rb_html5  = render_field_tokens_html(rb_val5,  rb_all_tokens, llm_all_tokens)
+        llm_html5 = render_field_tokens_html(llm_val5, rb_all_tokens, llm_all_tokens)
 
-        match_badge = (
-            '<span style="background:#d4edda;color:#155724;padding:2px 8px;'
-            'border-radius:3px;">✓ match</span>'
-            if is_match5 else
-            '<span style="background:#f8d7da;color:#721c24;padding:2px 8px;'
-            'border-radius:3px;">✗ differ</span>'
-        )
-        ord5  = ts5.get("ordered", None)
-        unord5 = ts5.get("unordered", None)
-        sim_str = f"  seq: {ord5:.2f}  f1: {unord5:.2f}" if ord5 is not None else ""
-        st.markdown(
-            match_badge + f'<span style="color:#666;font-size:0.85em;">&nbsp;&nbsp;{sim_str}</span>',
-            unsafe_allow_html=True,
-        )
-        st.markdown("")
+        match_bg    = "#d4edda" if is_match5 else "#f8d7da"
+        match_color = "#155724" if is_match5 else "#721c24"
+        match_label = "✓" if is_match5 else "✗"
+        cell_bg     = "#f8fff8" if is_match5 else "#fff"
 
-    # Coverage summary
-    st.markdown("---")
-    st.markdown("### Coverage Summary")
+        rows_html += f"""
+<tr style="border-bottom:1px solid #f0f0f0;">
+  <td style="width:120px;padding:8px 12px;vertical-align:top;
+             border-right:1px solid #f0f0f0;">
+    <div style="font-size:0.75rem;font-weight:600;color:#444;
+                text-transform:uppercase;letter-spacing:0.04em;">
+      {field.replace('_', ' ')}
+    </div>
+    <div style="margin-top:4px;">
+      <span style="background:{match_bg};color:{match_color};
+                   padding:1px 6px;border-radius:3px;font-size:0.7rem;">
+        {match_label}
+      </span>
+    </div>
+    <div style="font-size:0.65rem;color:#999;margin-top:3px;">
+      seq {ord5:.2f} · f1 {unord5:.2f}
+    </div>
+  </td>
+  <td style="width:44%;padding:8px 12px;vertical-align:top;
+             border-right:1px solid #f0f0f0;background:{cell_bg};">
+    <div style="font-size:0.65rem;font-weight:600;color:#1f77b4;
+                text-transform:uppercase;letter-spacing:0.05em;margin-bottom:4px;">
+      Rule-based
+    </div>
+    <div style="line-height:1.9;font-size:0.875rem;">
+      {rb_html5}
+    </div>
+  </td>
+  <td style="width:44%;padding:8px 12px;vertical-align:top;background:{cell_bg};">
+    <div style="font-size:0.65rem;font-weight:600;color:#ff7f0e;
+                text-transform:uppercase;letter-spacing:0.05em;margin-bottom:4px;">
+      LLM
+    </div>
+    <div style="line-height:1.9;font-size:0.875rem;">
+      {llm_html5}
+    </div>
+  </td>
+</tr>"""
+
+    st.markdown(f"""
+<div style="border:1px solid #e0e0e0;border-radius:8px;overflow:hidden;">
+  <table style="width:100%;border-collapse:collapse;">
+    {rows_html}
+  </table>
+</div>
+""", unsafe_allow_html=True)
+
+    # ── Coverage summary card ─────────────────────────────────────────────────
     rb_cov5  = comp5.get("rb_coverage_pct", 0) or 0
     llm_cov5 = comp5.get("llm_coverage_pct", 0) or 0
     gap5     = rb_cov5 - llm_cov5
 
-    cov_c1, cov_c2, cov_c3 = st.columns(3)
-    cov_c1.metric("RB coverage", f"{rb_cov5:.1f}%")
-    cov_c2.metric("LLM coverage", f"{llm_cov5:.1f}%")
-    cov_c3.metric("Gap (RB − LLM)", f"{gap5:.1f}%")
-
     miss_tokens = [a["token"] for a in ann5 if a["colour"] == "miss"]
-    if miss_tokens:
-        st.markdown(
-            f'**Uncovered tokens ({len(miss_tokens)}):** '
-            + " ".join(
-                f'<span style="background:#f8d7da;color:#721c24;padding:1px 4px;'
-                f'border-radius:3px;">{t}</span>'
-                for t in miss_tokens
-            ),
-            unsafe_allow_html=True,
+    miss_html = " ".join(
+        f'<span style="background:#f8d7da;color:#721c24;padding:1px 5px;'
+        f'border-radius:3px;font-size:0.8rem;">{t}</span>'
+        for t in miss_tokens
+    ) if miss_tokens else '<span style="color:#155724;">None ✓</span>'
+
+    gap_color = "#d62728" if gap5 > 5 else "#2ca02c"
+
+    st.markdown(f"""
+<div style="background:#f8f9fa;border:1px solid #e0e0e0;
+            border-radius:8px;padding:14px 20px;margin-top:16px;">
+  <div style="font-size:0.7rem;font-weight:600;letter-spacing:0.08em;
+              text-transform:uppercase;color:#888;margin-bottom:10px;">
+    COVERAGE SUMMARY
+  </div>
+  <div style="display:flex;gap:24px;margin-bottom:10px;">
+    <div>
+      <div style="font-size:0.7rem;color:#666;">Rule-based</div>
+      <div style="font-size:1.3rem;font-weight:700;color:#1f77b4;">
+        {rb_cov5:.1f}%
+      </div>
+    </div>
+    <div>
+      <div style="font-size:0.7rem;color:#666;">LLM</div>
+      <div style="font-size:1.3rem;font-weight:700;color:#ff7f0e;">
+        {llm_cov5:.1f}%
+      </div>
+    </div>
+    <div>
+      <div style="font-size:0.7rem;color:#666;">Gap</div>
+      <div style="font-size:1.3rem;font-weight:700;color:{gap_color};">
+        {gap5:.1f}%
+      </div>
+    </div>
+  </div>
+  <div style="font-size:0.75rem;color:#666;margin-top:6px;">
+    <strong>Uncovered tokens:</strong> {miss_html}
+  </div>
+</div>
+""", unsafe_allow_html=True)
+
+
+elif page == "semantic":
+
+    if embed_data is None:
+        st.title("Semantic Space")
+        st.info("""
+**embeddings.json not found.**
+
+Run `embed.py` once locally to generate pre-computed UMAP and PCA coordinates:
+
+```
+pip install sentence-transformers umap-learn scipy scikit-learn
+python embed.py
+```
+
+Place the output `data/embeddings.json` in the `data/` folder, then reload the app.
+        """)
+        st.stop()
+
+    emb_entries = embed_data["entries"]
+    emb_meta    = embed_data.get("meta", {})
+
+    # ── Sidebar controls ──────────────────────────────────────────────────────
+    st.sidebar.markdown("### Display")
+
+    # Detect whether this file has PCA coords (new format)
+    _has_pca = bool(embed_data["entries"] and "rb_pca" in embed_data["entries"][0])
+
+    projection = st.sidebar.radio(
+        "Projection",
+        ["UMAP", "PCA"] if _has_pca else ["UMAP"],
+        horizontal=True,
+        key="sem_proj",
+    )
+
+    show_llm   = st.sidebar.toggle("Show LLM points",  value=True,  key="sem_show_llm")
+    show_drift = st.sidebar.toggle("Show drift lines", value=False, key="sem_drift",
+                                   disabled=not show_llm)
+
+    colour_by = st.sidebar.selectbox(
+        "Colour points by",
+        ["agree_pct", "drift", "stratum", "entry_type"],
+        key="sem_colour",
+    )
+
+    st.sidebar.markdown("### Filter")
+
+    all_strata_sem = sorted({s for e in emb_entries for s in e.get("strata", [])})
+    sel_strata_sem = st.sidebar.multiselect("Strata", all_strata_sem, key="sem_strata")
+
+    min_agree_sem  = st.sidebar.slider("Min agree_pct", 0, 100, 0, key="sem_agree")
+    drift_pct_range = st.sidebar.slider("Drift percentile range", 0, 100, (0, 100),
+                                        key="sem_drift_range")
+    search_sem = st.sidebar.text_input("Highlight headword", key="sem_search")
+
+    if show_drift:
+        st.sidebar.markdown("### Drift line colour")
+        drift_line_colour = st.sidebar.selectbox(
+            "Colour lines by",
+            ["drift magnitude", "agree_pct", "uniform grey"],
+            key="sem_line_colour",
         )
     else:
-        st.success("No uncovered tokens — all source tokens appear in at least one system's output.")
+        drift_line_colour = "drift magnitude"
+
+    # ── Filter ────────────────────────────────────────────────────────────────
+    filtered_sem = emb_entries
+
+    if sel_strata_sem:
+        filtered_sem = [
+            e for e in filtered_sem
+            if any(s in e.get("strata", []) for s in sel_strata_sem)
+        ]
+
+    filtered_sem = [
+        e for e in filtered_sem
+        if e.get("agree_pct", 100) >= min_agree_sem
+    ]
+
+    # Use projection-specific drift percentile for the slider filter
+    _drift_pct_key = "drift_pca_pct" if projection == "PCA" else "drift_pct"
+
+    dlo = drift_pct_range[0] / 100
+    dhi = drift_pct_range[1] / 100
+    filtered_sem = [
+        e for e in filtered_sem
+        if dlo <= e.get(_drift_pct_key, 0) <= dhi
+    ]
+
+    if not filtered_sem:
+        st.warning("No entries match the current filters.")
+        st.stop()
+
+    # ── Projection-specific coordinate and drift keys ─────────────────────────
+    # New format: rb_umap / rb_pca.  Old format (UMAP only): rb_xyz fallback.
+    if projection == "PCA" and _has_pca:
+        _rb_key    = "rb_pca"
+        _llm_key   = "llm_pca"
+        _drift_key = "drift_pca"
+    else:
+        # Prefer explicit rb_umap; fall back to rb_xyz for old embeddings.json
+        _first = filtered_sem[0]
+        _rb_key    = "rb_umap"  if "rb_umap"  in _first else "rb_xyz"
+        _llm_key   = "llm_umap" if "llm_umap" in _first else "llm_xyz"
+        _drift_key = "drift"
+
+    # ── Colour scale logic ────────────────────────────────────────────────────
+    def get_point_colours(ents, cb):
+        if cb == "agree_pct":
+            vals = [e.get("agree_pct", 100) for e in ents]
+            return vals, "RdYlGn", (0, 100), "agree %"
+        elif cb == "drift":
+            vals = [e.get(_drift_key, 0) for e in ents]
+            mn, mx = min(vals), max(vals)
+            return vals, "RdYlGn_r", (mn, mx), "drift"
+        elif cb == "entry_type":
+            type_map = {"full": 1, "cross_ref": 0}
+            vals = [type_map.get(e.get("entry_type", "full"), 1) for e in ents]
+            return vals, "RdBu", (0, 1), "type"
+        else:  # stratum count
+            vals = [len(e.get("strata", [])) for e in ents]
+            mx = max(vals) if vals else 1
+            return vals, "Viridis", (0, mx), "strata count"
+
+    # ── Build arrays ──────────────────────────────────────────────────────────
+    rb_x  = [e[_rb_key][0]  for e in filtered_sem]
+    rb_y  = [e[_rb_key][1]  for e in filtered_sem]
+    rb_z  = [e[_rb_key][2]  for e in filtered_sem]
+    llm_x = [e[_llm_key][0] for e in filtered_sem]
+    llm_y = [e[_llm_key][1] for e in filtered_sem]
+    llm_z = [e[_llm_key][2] for e in filtered_sem]
+
+    headwords = [e.get("headword", "")       for e in filtered_sem]
+    para_ids  = [e.get("para_id", 0)         for e in filtered_sem]
+    agrees    = [e.get("agree_pct", 100)     for e in filtered_sem]
+    drifts    = [e.get(_drift_key, 0)        for e in filtered_sem]
+    rb_defs   = [e.get("rb_def",  "")[:80]  for e in filtered_sem]
+    llm_defs  = [e.get("llm_def", "")[:80]  for e in filtered_sem]
+
+    col_vals, col_scale, col_range, col_label = get_point_colours(filtered_sem, colour_by)
+
+    highlight_mask = [
+        search_sem.lower() in hw.lower() if search_sem else False
+        for hw in headwords
+    ]
+    sizes_rb  = [10 if h else 4 for h in highlight_mask]
+    sizes_llm = [10 if h else 4 for h in highlight_mask]
+
+    # ── Build figure ──────────────────────────────────────────────────────────
+    fig = go.Figure()
+
+    # Trace 1 — Rule-based points
+    fig.add_trace(go.Scatter3d(
+        x=rb_x, y=rb_y, z=rb_z,
+        mode="markers",
+        name="Rule-based",
+        marker=dict(
+            size=sizes_rb,
+            color=col_vals,
+            colorscale=col_scale,
+            cmin=col_range[0],
+            cmax=col_range[1],
+            colorbar=dict(title=col_label, thickness=12),
+            opacity=0.85,
+            symbol="circle",
+        ),
+        customdata=list(zip(para_ids, headwords, rb_defs, agrees, drifts)),
+        hovertemplate=(
+            "<b>%{customdata[1]}</b><br>"
+            "para_id: %{customdata[0]}<br>"
+            "agree: %{customdata[3]:.1f}%<br>"
+            "drift: %{customdata[4]:.4f}<br>"
+            "def: %{customdata[2]}<extra>Rule-based</extra>"
+        ),
+    ))
+
+    # Trace 2 — LLM points
+    if show_llm:
+        fig.add_trace(go.Scatter3d(
+            x=llm_x, y=llm_y, z=llm_z,
+            mode="markers",
+            name="LLM",
+            marker=dict(
+                size=sizes_llm,
+                color=col_vals,
+                colorscale=col_scale,
+                cmin=col_range[0],
+                cmax=col_range[1],
+                opacity=0.65,
+                symbol="diamond",
+                showscale=False,
+            ),
+            customdata=list(zip(para_ids, headwords, llm_defs, agrees, drifts)),
+            hovertemplate=(
+                "<b>%{customdata[1]}</b><br>"
+                "para_id: %{customdata[0]}<br>"
+                "agree: %{customdata[3]:.1f}%<br>"
+                "drift: %{customdata[4]:.4f}<br>"
+                "def: %{customdata[2]}<extra>LLM</extra>"
+            ),
+        ))
+
+    # Trace 3 — Drift lines
+    if show_drift and show_llm:
+        lx, ly, lz = [], [], []
+        for i in range(len(filtered_sem)):
+            lx += [rb_x[i], llm_x[i], None]
+            ly += [rb_y[i], llm_y[i], None]
+            lz += [rb_z[i], llm_z[i], None]
+
+        mean_d = sum(drifts) / len(drifts) if drifts else 0
+        max_d  = max(drifts) if drifts else 1
+        r = int(255 * mean_d / max_d)
+        g = int(255 * (1 - mean_d / max_d))
+        line_col = f"rgba({r},{g},0,0.35)"
+
+        if drift_line_colour == "agree_pct":
+            mean_a = sum(agrees) / len(agrees) if agrees else 100
+            r2 = int(255 * (1 - mean_a / 100))
+            g2 = int(255 * mean_a / 100)
+            line_col = f"rgba({r2},{g2},0,0.35)"
+        elif drift_line_colour == "uniform grey":
+            line_col = "rgba(128,128,128,0.3)"
+
+        fig.add_trace(go.Scatter3d(
+            x=lx, y=ly, z=lz,
+            mode="lines",
+            name="Drift",
+            line=dict(color=line_col, width=1),
+            hoverinfo="skip",
+        ))
+
+    fig.update_layout(
+        height=700,
+        margin=dict(l=0, r=0, t=40, b=0),
+        paper_bgcolor="rgba(0,0,0,0)",
+        scene=dict(
+            xaxis=dict(showticklabels=False, title=""),
+            yaxis=dict(showticklabels=False, title=""),
+            zaxis=dict(showticklabels=False, title=""),
+            bgcolor="rgba(248,249,250,1)",
+        ),
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
+        title=dict(
+            text=(
+                f"Semantic space [{projection}] — {len(filtered_sem):,} entries"
+                + (f" · {emb_meta.get('model', '')}" if emb_meta.get("model") else "")
+            ),
+            font=dict(size=13),
+            x=0,
+        ),
+    )
+
+    # PCA variance annotation (shown only in PCA mode)
+    if projection == "PCA" and "pca_params" in emb_meta:
+        pca_p = emb_meta["pca_params"]
+        evr   = pca_p.get("explained_variance_ratio", [])
+        if evr:
+            st.caption(
+                f"PCA explained variance — "
+                f"PC1: {evr[0]*100:.1f}%  "
+                f"PC2: {evr[1]*100:.1f}%  "
+                f"PC3: {evr[2]*100:.1f}%  "
+                f"(total {pca_p.get('total_explained_variance', 0)*100:.1f}%)"
+            )
+
+    st.plotly_chart(fig, use_container_width=True)
+
+    # ── Stats row ─────────────────────────────────────────────────────────────
+    drift_label = f"Mean drift ({projection})"
+    sc1, sc2, sc3, sc4 = st.columns(4)
+    sc1.metric("Entries shown", f"{len(filtered_sem):,}")
+    sc2.metric(drift_label,
+               f"{sum(drifts)/len(drifts):.4f}" if drifts else "—")
+    sc3.metric(f"Max drift ({projection})",
+               f"{max(drifts):.4f}" if drifts else "—")
+    sc4.metric("Model", emb_meta.get("model", "—"))
+
+    # ── Entry inspector ───────────────────────────────────────────────────────
+    st.markdown("---")
+    st.markdown("**Enter a para_id to inspect an entry:**")
+
+    sel_pid_sem = st.number_input(
+        "para_id", min_value=1, max_value=9999, value=1, step=1, key="sem_pid",
+    )
+
+    if sel_pid_sem and sel_pid_sem in entry_map:
+        sel_entry = entry_map[sel_pid_sem]
+        sel_emb   = next(
+            (e for e in emb_entries if e["para_id"] == sel_pid_sem), None
+        )
+        hw_sel = sel_entry["rb"].get("headword") or ""
+
+        st.markdown(f"""
+<div style="background:#1a1a2e;color:white;padding:12px 20px;
+            border-radius:8px;margin-bottom:12px;">
+  <span style="font-size:1.2rem;font-weight:700;">{hw_sel}</span>
+  <span style="opacity:0.5;font-size:0.8rem;margin-left:12px;">
+    para_id {sel_pid_sem}
+  </span>
+</div>
+""", unsafe_allow_html=True)
+
+        col_src, col_meta = st.columns([2, 1])
+
+        with col_src:
+            st.markdown("**Source text**")
+            st.markdown(
+                f'<div style="background:#f8f9fa;border:1px solid #e0e0e0;'
+                f'border-radius:6px;padding:12px;font-size:0.875rem;">'
+                f'{sel_entry["full_text"]}</div>',
+                unsafe_allow_html=True,
+            )
+
+        with col_meta:
+            st.markdown("**Semantic metrics**")
+            if sel_emb:
+                st.markdown(f"**Drift:** `{sel_emb.get('drift', 0):.4f}`")
+                st.markdown(
+                    f"**Drift percentile:** "
+                    f"`{sel_emb.get('drift_pct', 0) * 100:.1f}th`"
+                )
+                st.markdown("**RB definition:**")
+                st.info(sel_emb.get("rb_def", "—") or "—")
+                st.markdown("**LLM definition:**")
+                st.warning(sel_emb.get("llm_def", "—") or "—")
+
+            st.markdown(
+                f"**Agree:** `{sel_entry['comparison']['agree_pct']:.1f}%`"
+            )
+            active_strata = [
+                fmt_stratum(k)
+                for k, v in sel_entry["comparison"]["strata"].items()
+                if v
+            ]
+            if active_strata:
+                st.markdown("**Strata:** " + ", ".join(active_strata))
