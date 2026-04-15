@@ -1,0 +1,642 @@
+{
+  "meta": {
+    "n_entries": 3899,
+    "scope": "entry_type==full, both systems present"
+  },
+  "aggregate": {
+    "total_llm_tokens": 83545,
+    "total_novel_tokens": 202,
+    "overall_novel_rate_pct": 0.2418,
+    "mean_entry_novel_rate_pct": 0.4386,
+    "entries_with_any_novel": 198,
+    "entries_with_novel_gt1pct": 197
+  },
+  "top_novel_tokens": [
+    {
+      "token": "phr",
+      "count": 53
+    },
+    {
+      "token": "verbal",
+      "count": 7
+    },
+    {
+      "token": "exclam",
+      "count": 5
+    },
+    {
+      "token": "none",
+      "count": 3
+    },
+    {
+      "token": "brash",
+      "count": 2
+    },
+    {
+      "token": "cior",
+      "count": 2
+    },
+    {
+      "token": "collop",
+      "count": 2
+    },
+    {
+      "token": "lick",
+      "count": 2
+    },
+    {
+      "token": "cut",
+      "count": 2
+    },
+    {
+      "token": "feck",
+      "count": 2
+    },
+    {
+      "token": "19th",
+      "count": 2
+    },
+    {
+      "token": "poke",
+      "count": 2
+    },
+    {
+      "token": "port",
+      "count": 2
+    },
+    {
+      "token": "ʃkiəhɔːn",
+      "count": 2
+    },
+    {
+      "token": "scut",
+      "count": 2
+    },
+    {
+      "token": "spunk",
+      "count": 2
+    },
+    {
+      "token": "bac",
+      "count": 1
+    },
+    {
+      "token": "beadai",
+      "count": 1
+    },
+    {
+      "token": "adv",
+      "count": 1
+    },
+    {
+      "token": "bæltənə",
+      "count": 1
+    },
+    {
+      "token": "blirt",
+      "count": 1
+    },
+    {
+      "token": "bɩuːmər",
+      "count": 1
+    },
+    {
+      "token": "bluːtər",
+      "count": 1
+    },
+    {
+      "token": "bloː",
+      "count": 1
+    },
+    {
+      "token": "bonafide",
+      "count": 1
+    },
+    {
+      "token": "brack",
+      "count": 1
+    },
+    {
+      "token": "brideogs",
+      "count": 1
+    },
+    {
+      "token": "bush",
+      "count": 1
+    },
+    {
+      "token": "cam",
+      "count": 1
+    },
+    {
+      "token": "carrow",
+      "count": 1
+    },
+    {
+      "token": "cis",
+      "count": 1
+    },
+    {
+      "token": "kʌmˈeːdər",
+      "count": 1
+    },
+    {
+      "token": "crosser",
+      "count": 1
+    },
+    {
+      "token": "dæɡən",
+      "count": 1
+    },
+    {
+      "token": "ʤærəɡ",
+      "count": 1
+    },
+    {
+      "token": "dɛtnoːtıs",
+      "count": 1
+    },
+    {
+      "token": "dicheall",
+      "count": 1
+    },
+    {
+      "token": "wɪt",
+      "count": 1
+    },
+    {
+      "token": "drausoːg",
+      "count": 1
+    },
+    {
+      "token": "drɔːhiː",
+      "count": 1
+    },
+    {
+      "token": "drɑdərə",
+      "count": 1
+    },
+    {
+      "token": "dress",
+      "count": 1
+    },
+    {
+      "token": "duːxɔːn",
+      "count": 1
+    },
+    {
+      "token": "duːdərə",
+      "count": 1
+    },
+    {
+      "token": "pejor",
+      "count": 1
+    },
+    {
+      "token": "ˈfuːdər",
+      "count": 1
+    },
+    {
+      "token": "gærˈɔːn",
+      "count": 1
+    },
+    {
+      "token": "gæˈrɔːn",
+      "count": 1
+    },
+    {
+      "token": "geek",
+      "count": 1
+    },
+    {
+      "token": "gjoːˈkɔːn",
+      "count": 1
+    },
+    {
+      "token": "gob",
+      "count": 1
+    },
+    {
+      "token": "ˈgʌbɔːn",
+      "count": 1
+    },
+    {
+      "token": "grabach",
+      "count": 1
+    },
+    {
+      "token": "graur",
+      "count": 1
+    },
+    {
+      "token": "gradəm",
+      "count": 1
+    },
+    {
+      "token": "greːdəl",
+      "count": 1
+    },
+    {
+      "token": "grɑfɔːn",
+      "count": 1
+    },
+    {
+      "token": "gruːdlz",
+      "count": 1
+    },
+    {
+      "token": "gruəgəx",
+      "count": 1
+    },
+    {
+      "token": "gruəməxɔːn",
+      "count": 1
+    },
+    {
+      "token": "giːˈpjuːr",
+      "count": 1
+    },
+    {
+      "token": "mək",
+      "count": 1
+    },
+    {
+      "token": "heː",
+      "count": 1
+    },
+    {
+      "token": "hæzərd",
+      "count": 1
+    },
+    {
+      "token": "hεedstal",
+      "count": 1
+    },
+    {
+      "token": "hεdəbɔːl",
+      "count": 1
+    },
+    {
+      "token": "hartiː",
+      "count": 1
+    },
+    {
+      "token": "sammon",
+      "count": 1
+    },
+    {
+      "token": "huːʃ",
+      "count": 1
+    },
+    {
+      "token": "howandever",
+      "count": 1
+    },
+    {
+      "token": "hurl",
+      "count": 1
+    },
+    {
+      "token": "jag",
+      "count": 1
+    },
+    {
+      "token": "colloq",
+      "count": 1
+    },
+    {
+      "token": "kill",
+      "count": 1
+    },
+    {
+      "token": "knock",
+      "count": 1
+    },
+    {
+      "token": "ladhar",
+      "count": 1
+    },
+    {
+      "token": "leave",
+      "count": 1
+    },
+    {
+      "token": "name",
+      "count": 1
+    },
+    {
+      "token": "grandfather",
+      "count": 1
+    },
+    {
+      "token": "waddler",
+      "count": 1
+    },
+    {
+      "token": "mearog",
+      "count": 1
+    },
+    {
+      "token": "18th",
+      "count": 1
+    },
+    {
+      "token": "miog",
+      "count": 1
+    },
+    {
+      "token": "ˈwɑnənˈwɑn",
+      "count": 1
+    },
+    {
+      "token": "ˈpʌtʃiːn",
+      "count": 1
+    },
+    {
+      "token": "prog",
+      "count": 1
+    },
+    {
+      "token": "puic",
+      "count": 1
+    },
+    {
+      "token": "reel",
+      "count": 1
+    },
+    {
+      "token": "skadɔːn",
+      "count": 1
+    },
+    {
+      "token": "skafərə",
+      "count": 1
+    },
+    {
+      "token": "skæltʃiːn",
+      "count": 1
+    },
+    {
+      "token": "scairt",
+      "count": 1
+    },
+    {
+      "token": "ʃkiəhoːg",
+      "count": 1
+    },
+    {
+      "token": "ˈjkıdər",
+      "count": 1
+    },
+    {
+      "token": "ʃæməʤə",
+      "count": 1
+    },
+    {
+      "token": "ʃæmər",
+      "count": 1
+    },
+    {
+      "token": "ʃaunɔːn",
+      "count": 1
+    },
+    {
+      "token": "shore",
+      "count": 1
+    },
+    {
+      "token": "ʃʌnəx",
+      "count": 1
+    },
+    {
+      "token": "skelp",
+      "count": 1
+    }
+  ],
+  "worst_entries": [
+    {
+      "para_id": 497,
+      "headword": "brídeogs",
+      "novel_count": 2,
+      "total_llm_tokens": 10,
+      "novel_rate_pct": 20.0,
+      "novel_tokens": [
+        "brideogs",
+        "exclam"
+      ],
+      "full_text": "brídeogs2 /ˈbrɪːʤoːgz/ excl., exclamation to express amazement (SM, Galway) < Shelta < Ir brídeog."
+    },
+    {
+      "para_id": 1154,
+      "headword": "dıcheall",
+      "novel_count": 2,
+      "total_llm_tokens": 20,
+      "novel_rate_pct": 10.0,
+      "novel_tokens": [
+        "dicheall",
+        "verbal"
+      ],
+      "full_text": "dıcheall /ˈʤi:həl/ v.n., (making) a big effort, doing the best one can (SOM, Kerry, who adds: ‘dícheallach, industrious, full of endeavour, busy’) < Ir."
+    },
+    {
+      "para_id": 1849,
+      "headword": "hay muck",
+      "novel_count": 2,
+      "total_llm_tokens": 10,
+      "novel_rate_pct": 20.0,
+      "novel_tokens": [
+        "heː",
+        "mək"
+      ],
+      "full_text": "hay muck /ˈheː ˈmək/ excl., ‘Shoo pig’ (PM, Leitrim) < Ir. hois muc."
+    },
+    {
+      "para_id": 2222,
+      "headword": "mamo",
+      "novel_count": 2,
+      "total_llm_tokens": 22,
+      "novel_rate_pct": 9.0909,
+      "novel_tokens": [
+        "grandfather",
+        "name"
+      ],
+      "full_text": "Mamo /ˈmæmoː/ and Dado /ˈdædoː/ (MT, Dublin, writes, ‘These are the familiar names in our family for our grandparents. Thus we always called Eoin MacNeill Dadó and our grandmother Mamó.’)"
+    },
+    {
+      "para_id": 60,
+      "headword": "aireacaí",
+      "novel_count": 1,
+      "total_llm_tokens": 31,
+      "novel_rate_pct": 3.2258,
+      "novel_tokens": [
+        "phr"
+      ],
+      "full_text": "aireacaí /ˈærəkiː/ n.pl., irritation on the backs of legs (usually after working in a bog or around cow manure); chilblains < Ir. ‘They always used to have the aireacaí on the backs of their legs coming to school, and cuts on their feet too, as they carried their shoes and went barefoot’ (BC, Meath)."
+    },
+    {
+      "para_id": 158,
+      "headword": "bac",
+      "novel_count": 1,
+      "total_llm_tokens": 13,
+      "novel_rate_pct": 7.6923,
+      "novel_tokens": [
+        "bac"
+      ],
+      "full_text": "bac2 /bɑk/ also back v., to hinder < Ir. ‘Don’t you be backing me from doing what I want to do’ (BC, Meath)."
+    },
+    {
+      "para_id": 255,
+      "headword": "beadaí",
+      "novel_count": 1,
+      "total_llm_tokens": 11,
+      "novel_rate_pct": 9.0909,
+      "novel_tokens": [
+        "beadai"
+      ],
+      "full_text": "beadaí1 /ˈbædiː/ also baddhy n., a pet name for a goose; used to call geese < Ir. ‘Baddhy, baddhy!’"
+    },
+    {
+      "para_id": 278,
+      "headword": "begrudgers",
+      "novel_count": 1,
+      "total_llm_tokens": 73,
+      "novel_rate_pct": 1.3699,
+      "novel_tokens": [
+        "phr"
+      ],
+      "full_text": "begrudgers /bıˈɡrʌʤərz/ n.pl., in the phrase ‘fuck (or FECK) the begrudgers’, a common expression dismissive of people who are forever grumbling about and criticising other people’s success < E prefix be- + grudge < ME grucchen, to grumble (cf. Gregory, Spreading the News (Selected Plays, vol 3, 1983): “Tim Casey: Why wouldn’t he get a wake as well as another? Would you begrudge him that much?”). ‘They say we’re a nation of begrudgers, and, let me tell you, they’re right: look what they said about poor old Felix when he won the money at the bingo.’ Leonard, Out After Dark, 166: “... knowing that anyone who fetched him a bleak look or threw doubt on his rough-hewn goodness would be scorned as a begrudger.”"
+    },
+    {
+      "para_id": 279,
+      "headword": "behind the door",
+      "novel_count": 1,
+      "total_llm_tokens": 29,
+      "novel_rate_pct": 3.4483,
+      "novel_tokens": [
+        "adv"
+      ],
+      "full_text": "behind the door /bəˈhaind ｄə doːr/ phr. (colloq.), ‘an adjectival phrase, usually used in the negative and meaning not lacking or not unready. “She wasn’t behind the door when they were giving out brains”; “he wasn’t behind the door when it came to making money”’ (Brewer)."
+    },
+    {
+      "para_id": 288,
+      "headword": "beltane",
+      "novel_count": 1,
+      "total_llm_tokens": 26,
+      "novel_rate_pct": 3.8462,
+      "novel_tokens": [
+        "bæltənə"
+      ],
+      "full_text": "Beltane /ˈbælｔənə/ n., the first of May, an ancient Celtic festival, celebrated with the lighting of bonfires on hills < Ir Bealtaine. Lá Bealtaine, May Day. Dorgan, ‘Falling South’ (The Ordinary House of Love, 44): “. . . the melancholy | Burned out of it by the high Beltane sun.”"
+    },
+    {
+      "para_id": 322,
+      "headword": "black and tans",
+      "novel_count": 1,
+      "total_llm_tokens": 84,
+      "novel_rate_pct": 1.1905,
+      "novel_tokens": [
+        "phr"
+      ],
+      "full_text": "Black and Tans /ˈblækənˈtænz/ n.pl., an irregular British force (officially known as RIC Cadets) deployed against the IRA and the civilian population from March 1920 to October 1921, so termed from the mixed colour of their uniforms and the name of a famous pack of hounds; sometimes referred to as ‘Auxies’ (i.e. Auxiliaries) or simply as ‘the Tans’ < OE blæc, ME tanni. ‘Granny said she’d heard tell of the Tans when they were about the place, but she never saw them herself’; ‘The Tans came into the school playground and opened fire and shot the young fellow dead’ (KM, Kerry); ‘The Tans came in and they’d be looking for money or drink’ (PR, Mayo). Leonard, Out After Dark, 112: “I was cast as ‘Third Black and Tan’, with one line: ‘Which w’y did the bawstid double back?’”"
+    },
+    {
+      "para_id": 325,
+      "headword": "black oil",
+      "novel_count": 1,
+      "total_llm_tokens": 28,
+      "novel_rate_pct": 3.5714,
+      "novel_tokens": [
+        "phr"
+      ],
+      "full_text": "black oil, in the phrase. ‘She spewed black oil’, referring to an elderly, unmarried lady, past the time for getting married and having children, based on the expression used of an old tractor with inefficient parts (KM, Kerry)."
+    },
+    {
+      "para_id": 348,
+      "headword": "blirt",
+      "novel_count": 1,
+      "total_llm_tokens": 12,
+      "novel_rate_pct": 8.3333,
+      "novel_tokens": [
+        "blirt"
+      ],
+      "full_text": "blirt2 /blɪrt/ n., pejor., a general term of abuse, usually applied to males. Unknown origin."
+    },
+    {
+      "para_id": 358,
+      "headword": "bloomer",
+      "novel_count": 1,
+      "total_llm_tokens": 14,
+      "novel_rate_pct": 7.1429,
+      "novel_tokens": [
+        "bɩuːmər"
+      ],
+      "full_text": "bloomer /ˈbƖuːmər/ n., v., deliberate or accidental mistake of communication where a third party to the communication is negatively affected (SM, Galway) < Shelta."
+    },
+    {
+      "para_id": 360,
+      "headword": "blooter",
+      "novel_count": 1,
+      "total_llm_tokens": 16,
+      "novel_rate_pct": 6.25,
+      "novel_tokens": [
+        "bluːtər"
+      ],
+      "full_text": "blooter /ˈbluːｔər/ n., ‘a clumsy, blundering person. blootered, exhausted; incapable of further exertion; helplessly drunk < Scots bluiter, orig.obsc.’ (Fenton, Ulster-Scots)."
+    },
+    {
+      "para_id": 362,
+      "headword": "blow-in",
+      "novel_count": 1,
+      "total_llm_tokens": 13,
+      "novel_rate_pct": 7.6923,
+      "novel_tokens": [
+        "bloː"
+      ],
+      "full_text": "blow-in /ˈbloː ɪn/ n., ‘a term meaning someone living in an area, who did not originate there’ (Brewer). See RUNNER."
+    },
+    {
+      "para_id": 413,
+      "headword": "bonafide",
+      "novel_count": 1,
+      "total_llm_tokens": 22,
+      "novel_rate_pct": 4.5455,
+      "novel_tokens": [
+        "bonafide"
+      ],
+      "full_text": "bonafide2 /ˈbɑnə ˈfiːd/ adj., n., genuine, Synge, The Playboy of the Western World, Act I, 10: “the way every living Christian is a bona fide, saving one widow alone?”"
+    },
+    {
+      "para_id": 467,
+      "headword": "brack",
+      "novel_count": 1,
+      "total_llm_tokens": 4,
+      "novel_rate_pct": 25.0,
+      "novel_tokens": [
+        "brack"
+      ],
+      "full_text": "brack2, see BARMBRACK; BREAC."
+    },
+    {
+      "para_id": 477,
+      "headword": "brash",
+      "novel_count": 1,
+      "total_llm_tokens": 20,
+      "novel_rate_pct": 5.0,
+      "novel_tokens": [
+        "brash"
+      ],
+      "full_text": "brash1 /bræʃ/ n., in the process of churning milk, the down strokes from the churn-dash were called ‘brashes’ (PM, Leitrim) < Ir brais n., a bout, a turn (Dinneen)."
+    },
+    {
+      "para_id": 478,
+      "headword": "brash",
+      "novel_count": 1,
+      "total_llm_tokens": 6,
+      "novel_rate_pct": 16.6667,
+      "novel_tokens": [
+        "brash"
+      ],
+      "full_text": "brash2 /bræʃ/ n., ‘a turn of sickness’ (PWJ)."
+    }
+  ]
+}
