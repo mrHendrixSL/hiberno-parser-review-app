@@ -221,9 +221,13 @@ def annotate_tokens(full_text: str, rb: dict, llm: dict) -> list:
     result = []
     for token in full_text.split():
         norm = normalise(token)
-        rb_found  = norm in rb_tokens
-        llm_found = norm in llm_tokens
-        is_stop   = norm in STOPWORDS or len(norm) <= 2 or norm.isdigit()
+        # A source token like "left-handed" normalises to "left handed" (two words).
+        # Membership in rb_tokens/llm_tokens must use a set-intersection check on
+        # the individual sub-tokens, not a string-equality check on the joined form.
+        norm_parts = {t for t in norm.split() if len(t) > 2 and not t.isdigit()}
+        is_stop   = norm in STOPWORDS or len(norm) <= 2 or norm.isdigit() or not norm_parts
+        rb_found  = bool(norm_parts & rb_tokens)  if not is_stop else False
+        llm_found = bool(norm_parts & llm_tokens) if not is_stop else False
 
         if is_stop:
             colour = "stop"
@@ -273,9 +277,10 @@ def render_field_tokens_html(value, rb_tokens: set, llm_tokens: set) -> str:
     parts = []
     for token in text.split():
         norm = normalise(token)
-        rb_found  = norm in rb_tokens
-        llm_found = norm in llm_tokens
-        is_stop   = norm in STOPWORDS or len(norm) <= 2 or norm.isdigit()
+        norm_parts = {t for t in norm.split() if len(t) > 2 and not t.isdigit()}
+        is_stop   = norm in STOPWORDS or len(norm) <= 2 or norm.isdigit() or not norm_parts
+        rb_found  = bool(norm_parts & rb_tokens)  if not is_stop else False
+        llm_found = bool(norm_parts & llm_tokens) if not is_stop else False
         if is_stop:
             colour = "stop"
         elif rb_found and llm_found:
